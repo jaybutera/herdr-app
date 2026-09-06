@@ -1,0 +1,246 @@
+/* Design tokens and global styles. Section 6 and 7 of DESIGN.md. */
+
+@font-face {
+  font-family: 'Inter';
+  src: url('./fonts/InterVariable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('./fonts/JetBrainsMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* 6.1 palette */
+  --bg: #0b0e13;
+  --surface: #12161e;
+  --surface-2: #1a2029;
+  --hairline: rgba(255, 255, 255, 0.07);
+  --t-primary: #e8ecf1;
+  --t-secondary: #8c95a3;
+  --t-tertiary: #586170;
+  --accent: #7c8cff;
+  --accent-press: #6473f0;
+  --c-live: #3ddc97;
+  --c-wait: #f2c14e;
+  --c-done: #7fa3ff;
+  --c-alert: #ff6b6b;
+  --c-muted: #8c95a3;
+  --c-dead: #4a525e;
+
+  /* 7 motion */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: linear(0, 0.4 25%, 0.85 50%, 1.03 70%, 0.99 85%, 1);
+  --d-fast: 120ms;
+  --d-base: 220ms;
+  --d-slow: 320ms;
+
+  /* 6.3 shape */
+  --r-card: 14px;
+  --r-bubble: 18px;
+  --r-chip: 999px;
+  --r-composer: 22px;
+  --r-button: 12px;
+
+  --pad-screen: 16px;
+
+  color-scheme: dark;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-feature-settings: 'cv11', 'ss01', 'tnum';
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  text-size-adjust: 100%;
+}
+
+@media (min-width: 900px) {
+  :root {
+    --pad-screen: 24px;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overscroll-behavior-y: none;
+}
+
+body {
+  background: var(--bg);
+  color: var(--t-primary);
+  font-size: 15px;
+  line-height: 22px;
+  /* The WebView must never flash white before the app paints. */
+}
+
+#app {
+  height: 100%;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  outline: none;
+}
+
+/* 6.2 type scale */
+.t-display {
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 600;
+}
+@media (min-width: 900px) {
+  .t-display {
+    font-size: 24px;
+    line-height: 30px;
+  }
+}
+.t-title {
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+}
+.t-heading {
+  font-size: 17px;
+  line-height: 22px;
+  font-weight: 600;
+}
+.t-body {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 400;
+}
+.t-meta {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 400;
+  color: var(--t-secondary);
+}
+.t-label {
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--t-secondary);
+}
+.mono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 18px;
+}
+.t-terminal {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Scrollbars: thin and dim, laptop only concern. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--surface-2);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 7: skeleton shimmer */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* 4: pulsing dot ring */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+@keyframes dot-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-3px);
+  }
+}
+
+/* Screen push/pop, section 7. */
+@keyframes screen-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes block-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 80ms !important;
+    scroll-behavior: auto !important;
+  }
+}

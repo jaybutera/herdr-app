@@ -1,0 +1,47 @@
+
+● API Error: Connection lost mid-response. The response above may be incomplete.
+
+✻ Sautéed for 38m 2s · done 12:34 PM
+
+❯ The connection dropped mid-response before DESIGN.md was written. Continue where you left off and write DESIGN.md as specified.
+
+● Writing DESIGN.md now with the Tauri 2 two-target stack note, then I'll self-check the prose against the writing rules.
+
+  Read 1 file, ran 1 shell command
+
+● The tertiary figure I wrote was wrong. Correcting it to the computed 3.1:1 and adding the dead-colour ratio, since that token also carries a label.
+
+  Ran 1 shell command
+
+● DESIGN.md is written at /home/casper/src/herdr-app/DESIGN.md, 746 lines, and it takes in Casper's mid-task update.
+
+  Stack change applied. The doc now specifies one web-tech UI codebase shipped two ways: an installed Android APK through Tauri 2 mobile, and the same bundle
+  served as a static page for the laptop browser. Jetpack Compose is dropped. Framework choice is left open with the constraints that matter spelled out: bundled
+  fonts, no Material library, CSS-driven motion with a View Transitions fallback, one responsive breakpoint at 900 px where the bottom bar becomes a rail and Fleet
+  becomes master-detail.
+
+  What the document covers
+
+  - Navigation: two tabs, Fleet and Chat, with Fleet as a stack of Projects, Project detail, Task detail. Settings is a sheet. Back behaviour, tab badges, and deep
+    links from chat events to tasks are defined.
+  - Every screen with an ASCII layout, content rules, and loading, empty, error and offline states. Task detail has a live mode with a Messages view that parses
+    pane text using the same block rules the orchestrator's extractLastAgentMessage uses, a raw Terminal view as the always-working fallback, a composer, and quick
+    keys for Esc, digits and Enter so permission dialogs can be answered from the phone.
+  - A status vocabulary table mapping every project, task and pane status to one colour token, glyph and label.
+  - Visual style: dark only, full token palette, Inter plus JetBrains Mono type scale, spacing, radii, elevation by lightness rather than shadow, Lucide icons.
+  - Motion: easing and duration tokens, and the behaviour of every transition including reduced-motion fallbacks.
+  - A component inventory of 33 components with props and notes.
+
+  One thing the backend side must know. Only projtrack exists as HTTP today. Section 2 of the doc fixes the request and response shapes for a pane bridge wrapping
+  the herdr CLI and a chat endpoint on the orchestrator daemon. The UI session can mock against those shapes; a backend session has to implement them. Polling
+  intervals are set with Server-Sent Events as an optional upgrade.
+
+  I computed the palette contrast ratios rather than estimating them and corrected one figure in the doc after checking: the tertiary text colour sits at 3.1:1 on
+  the background, so the doc restricts it to placeholders and disabled text.
+
+✻ Churned for 4m 7s · done 12:41 PM
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 2 agents                                                                                                  /rc

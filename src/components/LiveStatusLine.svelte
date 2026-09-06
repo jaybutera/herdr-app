@@ -1,0 +1,57 @@
+<script lang="ts">
+  import StatusDot from './StatusDot.svelte';
+  import { statusSpec } from '../lib/format';
+
+  let {
+    agentStatus,
+    paneId,
+    label,
+  }: { agentStatus: string; paneId: string; label?: string } = $props();
+
+  const spec = $derived(statusSpec('pane', agentStatus));
+  const blocked = $derived(agentStatus === 'blocked');
+</script>
+
+<div class="line" class:blocked>
+  <StatusDot domain="pane" value={agentStatus} size={9} />
+  <span class="t-meta status" style="color: {blocked ? 'var(--c-alert)' : 'var(--t-secondary)'}">
+    {spec.label}
+  </span>
+  <span class="t-meta sep">·</span>
+  <span class="mono id">{paneId}</span>
+  {#if label}
+    <span class="t-meta sep">·</span>
+    <span class="t-meta label">{label}</span>
+  {/if}
+</div>
+
+<style>
+  .line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 2px 0;
+    border-radius: var(--r-chip);
+    transition: background var(--d-base) var(--ease-out);
+  }
+  .blocked {
+    background: color-mix(in srgb, var(--c-alert) 12%, transparent);
+    padding: 2px 10px;
+    margin-left: -10px;
+  }
+  .id {
+    color: var(--t-secondary);
+    flex: none;
+  }
+  .sep,
+  .status {
+    flex: none;
+  }
+  .label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+</style>
