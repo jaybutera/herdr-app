@@ -160,7 +160,10 @@
 <div class="col">
   <div class="scroll" bind:this={scroller} onscroll={onScroll}>
     {#if error}
-      <ErrorBanner text="Can't reach the orchestrator" onRetry={() => void loadInitial()} />
+      <ErrorBanner
+        text="Can't reach the orchestrator{error ? ` — ${error}` : ''}"
+        onRetry={() => void loadInitial()}
+      />
     {/if}
 
     {#if loading && !messages.length}

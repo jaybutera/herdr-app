@@ -105,7 +105,7 @@
 
   <div class="scroll">
     {#if error}
-      <ErrorBanner text="Can't reach projtrack" onRetry={load} />
+      <ErrorBanner text="Can't reach projtrack{error ? ` — ${error}` : ''}" onRetry={load} />
     {/if}
 
     {#if loading && !project}

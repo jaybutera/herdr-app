@@ -30,6 +30,57 @@ function joinUrl(base: string, path: string): string {
   return base.replace(/\/+$/, '') + path;
 }
 
+/**
+ * On Android every request goes through tauri-plugin-http, which performs it in
+ * Rust rather than in the WebView.
+ *
+ * v0.1.0 used the WebView's own `fetch` and could not reach the laptop at all:
+ * the app showed "Can't reach projtrack" on a phone whose browser fetched the
+ * same URL fine. The WebView's networking is a second implementation with its
+ * own version skew and its own rules about what a page may request, and none of
+ * it is visible from the host. Going native takes the whole layer out of the
+ * path: the request is made by the app process, so what works from a shell on
+ * the phone works from the app.
+ *
+ * The laptop keeps the browser's `fetch`; there is no Tauri there to call.
+ */
+type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
+
+let nativeFetch: FetchFn | null = null;
+let nativeFetchLoaded = false;
+
+async function pickFetch(): Promise<FetchFn> {
+  const tauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  if (!tauri) return fetch;
+  if (!nativeFetchLoaded) {
+    nativeFetchLoaded = true;
+    try {
+      const mod = await import('@tauri-apps/plugin-http');
+      nativeFetch = mod.fetch as unknown as FetchFn;
+    } catch {
+      // Better a request through the WebView than no request at all.
+      nativeFetch = null;
+    }
+  }
+  return nativeFetch ?? fetch;
+}
+
+/**
+ * A 12 s deadline that does not assume `AbortSignal.timeout`.
+ *
+ * That method is Chrome 103 and later. minSdk here is 24, and Android System
+ * WebView updates independently of the OS, so an older one throws
+ * "AbortSignal.timeout is not a function" from inside the try block that wraps
+ * the fetch — which the catch then reported as a network error. This is the second
+ * half of the same v0.1.0 bug: a working network path presented as an
+ * unreachable server.
+ */
+function deadline(): { signal: AbortSignal; done: () => void } {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(new Error('Request timed out')), TIMEOUT_MS);
+  return { signal: ctrl.signal, done: () => clearTimeout(timer) };
+}
+
 async function request<T>(
   base: string,
   path: string,
@@ -41,15 +92,15 @@ async function request<T>(
   if (settings.token) headers['Authorization'] = `Bearer ${settings.token}`;
   if (init.body) headers['Content-Type'] = 'application/json';
 
+  const doFetch = await pickFetch();
+  const { signal, done } = deadline();
   let res: Response;
   try {
-    res = await fetch(joinUrl(base, path), {
-      ...init,
-      headers,
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
+    res = await doFetch(joinUrl(base, path), { ...init, headers, signal });
   } catch (err) {
     throw new ApiError(err instanceof Error ? err.message : 'Network error', 0);
+  } finally {
+    done();
   }
   if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status);
   if (res.status === 204) return undefined as T;

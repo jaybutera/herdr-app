@@ -296,7 +296,10 @@
 
   <div class="foot">
     {#if paneError}
-      <ErrorBanner text="Can't reach the pane bridge" onRetry={() => void readPane()} />
+      <ErrorBanner
+        text="Can't reach the pane bridge{paneError ? ` — ${paneError}` : ''}"
+        onRetry={() => void readPane()}
+      />
     {/if}
     <Composer
       placeholder="Message this session…"
@@ -315,7 +318,7 @@
   <!-- 5.3b history mode -->
   <div class="scroll">
     {#if taskError}
-      <ErrorBanner text="Can't reach projtrack" onRetry={loadTask} />
+      <ErrorBanner text="Can't reach projtrack{taskError ? ` — ${taskError}` : ''}" onRetry={loadTask} />
     {/if}
 
     {#if loadingTask && !task}

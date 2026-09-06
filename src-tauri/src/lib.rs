@@ -4,6 +4,9 @@ pub fn run() {
         // Settings persist in the store on Android; the laptop build uses
         // localStorage and never reaches this plugin.
         .plugin(tauri_plugin_store::Builder::default().build())
+        // Native HTTP, so requests leave the app instead of the WebView's
+        // networking stack. See src/lib/api.ts for why.
+        .plugin(tauri_plugin_http::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(

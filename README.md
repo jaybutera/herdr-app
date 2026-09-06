@@ -63,7 +63,7 @@ The daemon side lives in `~/src/herdr-telegram-orchestrator`, which serves the
 pane bridge and the chat endpoint. Its README documents the routes; the app is
 built against the shapes in section 2 of `DESIGN.md`.
 
-## Two things worth knowing before changing the build
+## Three things worth knowing before changing the build
 
 `devUrl` belongs in `src-tauri/tauri.conf.dev.json`, not the base config. With it
 in the base config Tauri treats every build as a dev build, embeds no frontend,
@@ -74,3 +74,13 @@ The pane transcript parser in `src/lib/pane-parse.ts` reads Claude Code's
 rendered output, which moves between releases. The Terminal toggle on task detail
 shows the raw pane text and does not depend on the parser, so a parser broken by
 a future release costs formatting rather than the screen.
+
+On Android every request goes through `tauri-plugin-http` rather than the
+WebView's `fetch`, and `src-tauri/capabilities/default.json` carries the URL
+scope that allows it; without that scope the plugin denies every request. This
+is what v0.1.1 fixed: v0.1.0 called the WebView's `fetch` with
+`AbortSignal.timeout`, which is Chrome 103 and later while `minSdk` here is 24,
+so on an older System WebView it threw before the request was made and the app
+reported a reachable server as unreachable. Keep new browser APIs out of the
+request path, or feature-detect them; the phone's WebView is not the laptop's
+browser and its version is not yours to choose.

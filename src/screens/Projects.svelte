@@ -130,7 +130,10 @@
   </div>
 
   {#if error}
-    <ErrorBanner text="Can't reach projtrack at {app.settings.projtrackUrl}" onRetry={() => load()} />
+    <ErrorBanner
+      text="Can't reach projtrack at {app.settings.projtrackUrl}{error ? ` — ${error}` : ''}"
+      onRetry={() => load()}
+    />
   {/if}
 
   <div class="list" class:dim={error && summary}>
