@@ -209,6 +209,40 @@ These are the only status colours in the app; nothing else uses them.
 The pulsing dot is a 8 px circle with a second ring scaling from 1× to 2.2× and
 fading out over 1.6 s, looping. Only `running` tasks and `working` panes pulse.
 
+### 4a. Live status: the ledger crossed with the pane
+
+A task carries two statuses and they disagree. projtrack's `status` is a ledger
+value, written at dispatch and rewritten only when something closes the task
+out; if a session finishes without that write landing, the row stays `running`
+forever. The pane's `agent_status` is the live signal, reported by the agent.
+
+Showing the ledger alone is what made the app claim work was in flight after it
+had finished: Fleet read "10 running" while `herdr agent list` reported three
+working panes, one of which was not a projtrack task. Task detail read its pane
+directly, so the same task said "Running" in the list and "Finished" once
+opened.
+
+So a task claiming to be `running` is believed only while its pane agrees. Every
+other ledger status is shown as-is: once a task is `done`, no pane overrides it.
+The resolver is `src/lib/live.ts`; these are the values it adds.
+
+| Live value | When | Token | Glyph | Label shown |
+| --- | --- | --- | --- | --- |
+| running | ledger running, pane working | `--c-live` | pulsing dot | Working |
+| blocked | ledger running, pane blocked | `--c-alert` | exclamation in ring | Needs you |
+| finished | ledger running, pane done | `--c-done` | check | Agent finished |
+| stalled | ledger running, pane idle | `--c-wait` | dash | Stopped |
+| orphan | ledger running, no such pane | `--c-dead` | slashed circle | Session gone |
+
+`finished`, `stalled` and `orphan` are the settled states: the agent has stopped
+and the task is waiting on Casper. They get their own "Needs review" group in
+project detail and a separate count in the Fleet summary line, so the running
+figure is only ever work actually in flight.
+
+When the pane list is unavailable, every task falls back to its ledger status.
+An unreachable bridge must not turn the fleet into a wall of dead sessions;
+that would be the same false claim pointed the other way.
+
 ## 5. Screens
 
 Each screen lists: layout, content rules, states, gestures. Widths in the

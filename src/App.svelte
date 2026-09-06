@@ -73,18 +73,22 @@
     window.addEventListener('popstate', onPop);
     history.pushState({ herdr: true }, '');
 
-    // Cache the pane list for the Fleet attention dot (section 3.2).
+    // The pane list is the live half of every task status (section 3.2), so it
+    // polls on the same cadence as the projects list rather than at a third of
+    // it: a task that finishes should stop reading "Working" within one tick,
+    // not up to 20s later.
     const pollPanes = async () => {
       if (!app.visible) return;
       try {
         const r = await bridge.panes(app.settings);
-        app.panes = r.panes ?? [];
+        app.setPanes(r.panes ?? []);
       } catch {
-        // The bridge may not be up; the dot simply stays off.
+        // The bridge may not be up. `panesKnown` stays as it was, so screens
+        // fall back to the ledger rather than calling every session an orphan.
       }
     };
     void pollPanes();
-    const paneTimer = setInterval(pollPanes, 20_000);
+    const paneTimer = setInterval(pollPanes, app.intervals.projects);
 
     return () => {
       mq.removeEventListener('change', apply);

@@ -5,12 +5,16 @@
     running,
     queued,
     projects,
+    needsReview = 0,
     refreshing = false,
     loading = false,
   }: {
     running: number;
     queued: number;
     projects: number;
+    /** Ledger-running tasks whose agent has stopped. Counted separately so the
+     *  running figure is only ever work actually in flight. */
+    needsReview?: number;
     refreshing?: boolean;
     loading?: boolean;
   } = $props();
@@ -23,6 +27,10 @@
     Loading fleet
   {:else}
     <span>{runText}</span>
+    {#if needsReview > 0}
+      <span class="sep s1"> · </span>
+      <span class="review">{needsReview} to review</span>
+    {/if}
     <span class="sep s1"> · </span>
     <span>{queued} queued</span>
     <span class="sep s2"> · </span>
@@ -33,6 +41,9 @@
 <style>
   .line {
     margin: 0;
+  }
+  .review {
+    color: var(--c-done);
   }
   .refreshing .sep {
     animation: sep-step 600ms var(--ease-in-out) infinite;

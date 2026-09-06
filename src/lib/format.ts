@@ -42,7 +42,7 @@ export function dayLabel(iso: string): string {
 
 // ---------- status vocabulary (section 4) ----------
 
-export type Domain = 'project' | 'task' | 'pane';
+export type Domain = 'project' | 'task' | 'pane' | 'live';
 export type Glyph = 'filled' | 'hollow' | 'strike' | 'pulse' | 'check' | 'cross' | 'dash' | 'bang' | 'question' | 'slashed';
 
 export interface StatusSpec {
@@ -74,10 +74,28 @@ const PANE: Record<string, StatusSpec> = {
   gone: { color: 'var(--c-dead)', glyph: 'slashed', label: 'Pane gone' },
 };
 
+/**
+ * The live vocabulary (section 4a): a task's ledger status crossed with what its
+ * pane is actually doing. `running` here means the agent is genuinely working;
+ * the three settled states are the cases the old UI reported as "Running".
+ */
+const LIVE: Record<string, StatusSpec> = {
+  running: { color: 'var(--c-live)', glyph: 'pulse', label: 'Working' },
+  blocked: { color: 'var(--c-alert)', glyph: 'bang', label: 'Needs you' },
+  finished: { color: 'var(--c-done)', glyph: 'check', label: 'Agent finished' },
+  stalled: { color: 'var(--c-wait)', glyph: 'dash', label: 'Stopped' },
+  orphan: { color: 'var(--c-dead)', glyph: 'slashed', label: 'Session gone' },
+  queued: { color: 'var(--c-wait)', glyph: 'hollow', label: 'Queued' },
+  done: { color: 'var(--c-done)', glyph: 'check', label: 'Done' },
+  failed: { color: 'var(--c-alert)', glyph: 'cross', label: 'Failed' },
+  abandoned: { color: 'var(--c-dead)', glyph: 'dash', label: 'Abandoned' },
+};
+
 const FALLBACK: StatusSpec = { color: 'var(--c-dead)', glyph: 'question', label: 'Unknown' };
 
 export function statusSpec(domain: Domain, value: string): StatusSpec {
-  const table = domain === 'project' ? PROJECT : domain === 'task' ? TASK : PANE;
+  const table =
+    domain === 'project' ? PROJECT : domain === 'task' ? TASK : domain === 'live' ? LIVE : PANE;
   return table[value] ?? FALLBACK;
 }
 
@@ -93,6 +111,27 @@ export function countsLine(counts: TaskCounts | undefined): string {
   const parts = order
     .filter(([k]) => (counts?.[k] ?? 0) > 0)
     .map(([k, word]) => `${counts?.[k]} ${word}`);
+  return parts.length ? parts.join(' · ') : 'No tasks yet';
+}
+
+/**
+ * The counts line with the ledger's running bucket split by what the panes say.
+ * "1 running · 2 need review" instead of "3 running", so a card never claims
+ * work is in flight when every one of its agents has stopped.
+ */
+export function liveCountsLine(counts: (TaskCounts & { needsReview: number }) | undefined): string {
+  const order: [keyof TaskCounts, string][] = [
+    ['running', 'running'],
+    ['queued', 'queued'],
+    ['done', 'done'],
+    ['failed', 'failed'],
+    ['abandoned', 'abandoned'],
+  ];
+  const parts = order
+    .filter(([k]) => (counts?.[k] ?? 0) > 0)
+    .map(([k, word]) => `${counts?.[k]} ${word}`);
+  const review = counts?.needsReview ?? 0;
+  if (review > 0) parts.splice(1, 0, `${review} need${review === 1 ? 's' : ''} review`);
   return parts.length ? parts.join(' · ') : 'No tasks yet';
 }
 

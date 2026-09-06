@@ -2,6 +2,7 @@
 // plain properties and the reactivity is handled here.
 
 import { DEFAULTS, loadSettings, saveSettings, POLL_INTERVALS, type Settings } from './settings';
+import { paneIndex, type PaneIndex } from './live';
 import type { Pane } from './types';
 
 export type Tab = 'fleet' | 'chat';
@@ -28,8 +29,10 @@ class AppStore {
 
   /** Consecutive failures across all sources; two in a row raise OfflineStrip. */
   failures = $state(0);
-  /** Panes cached from the bridge, for the Fleet attention dot. */
+  /** Panes cached from the bridge. The live half of every task status. */
   panes = $state<Pane[]>([]);
+  /** False until the first pane poll lands; nothing is judged live before then. */
+  panesKnown = $state(false);
   /** Set when chat has messages the user has not seen. */
   chatUnread = $state(false);
 
@@ -50,6 +53,17 @@ class AppStore {
 
   get needsAttention(): boolean {
     return this.panes.some((p) => p.agent_status === 'blocked');
+  }
+
+  /** Pane lookup by id, rebuilt only when the pane list itself changes. */
+  get paneIndex(): PaneIndex {
+    return paneIndex(this.panes);
+  }
+
+  /** Record a pane poll, including an empty-but-successful one. */
+  setPanes(panes: Pane[]) {
+    this.panes = panes;
+    this.panesKnown = true;
   }
 
   async init() {

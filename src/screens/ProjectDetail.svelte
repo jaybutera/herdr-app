@@ -11,6 +11,7 @@
   import ActionSheet from '../components/ActionSheet.svelte';
   import { app } from '../lib/store.svelte';
   import { ApiError, projtrack } from '../lib/api';
+  import { isSettled, liveTaskStatus } from '../lib/live';
   import { relativeTime, statusSpec } from '../lib/format';
   import type { ProjectDetail, ProjectStatus, Task } from '../lib/types';
   import { onMount } from 'svelte';
@@ -28,7 +29,16 @@
   let menuOpen = $state(false);
   let descExpanded = $state(false);
 
-  const running = $derived(project?.tasks.filter((t) => t.status === 'running') ?? []);
+  // "Running" means the pane is still working. A ledger-running task whose agent
+  // has stopped moves to its own group instead of padding the running list; that
+  // group is what Casper actually has to deal with.
+  const ledgerRunning = $derived(project?.tasks.filter((t) => t.status === 'running') ?? []);
+  const running = $derived(
+    ledgerRunning.filter((t) => !isSettled(liveTaskStatus(t, app.paneIndex, app.panesKnown)))
+  );
+  const needsReview = $derived(
+    ledgerRunning.filter((t) => isSettled(liveTaskStatus(t, app.paneIndex, app.panesKnown)))
+  );
   const queued = $derived(project?.tasks.filter((t) => t.status === 'queued') ?? []);
   const finished = $derived(
     (project?.tasks.filter((t) => ['done', 'failed', 'abandoned'].includes(t.status)) ?? [])
@@ -129,6 +139,10 @@
           <SectionLabel text="Running" />
           {#each running as t (t.id)}<TaskRow task={t} onOpen={() => onOpenTask(t)} />{/each}
         {/if}
+        {#if needsReview.length}
+          <SectionLabel text="Needs review" />
+          {#each needsReview as t (t.id)}<TaskRow task={t} onOpen={() => onOpenTask(t)} />{/each}
+        {/if}
         {#if queued.length}
           <SectionLabel text="Queued" />
           {#each queued as t (t.id)}<TaskRow task={t} onOpen={() => onOpenTask(t)} />{/each}
@@ -137,7 +151,7 @@
           <SectionLabel text="Finished" />
           {#each finished as t (t.id)}<TaskRow task={t} onOpen={() => onOpenTask(t)} />{/each}
         {/if}
-        {#if !running.length && !queued.length && !finished.length}
+        {#if !running.length && !needsReview.length && !queued.length && !finished.length}
           <EmptyState text="No tasks yet" />
         {/if}
       </div>

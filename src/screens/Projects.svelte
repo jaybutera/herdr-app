@@ -10,6 +10,7 @@
   import ActionSheet from '../components/ActionSheet.svelte';
   import { app } from '../lib/store.svelte';
   import { projtrack } from '../lib/api';
+  import { isSettled, liveTaskStatus } from '../lib/live';
   import type { ProjectStatus, Summary, SummaryProject } from '../lib/types';
   import { onMount } from 'svelte';
 
@@ -34,6 +35,33 @@
     { value: 'all', label: 'All' },
   ];
 
+  /** A project's running tasks split by what their panes actually report. */
+  function liveCount(p: SummaryProject) {
+    let running = 0;
+    let review = 0;
+    for (const t of p.running_tasks ?? []) {
+      if (isSettled(liveTaskStatus(t, app.paneIndex, app.panesKnown))) review += 1;
+      else running += 1;
+    }
+    return { running, review };
+  }
+
+  /** Fleet totals counted from the panes, not from the ledger's running_tasks. */
+  const totals = $derived.by(() => {
+    let running = 0;
+    let review = 0;
+    for (const p of summary?.projects ?? []) {
+      const c = liveCount(p);
+      running += c.running;
+      review += c.review;
+    }
+    // Tasks the summary counts as running but does not list are still counted;
+    // the ledger's total is the floor, and only what we can see gets moved.
+    const listed = (summary?.projects ?? []).reduce((n, p) => n + (p.running_tasks?.length ?? 0), 0);
+    const unseen = Math.max(0, (summary?.running_tasks ?? 0) - listed);
+    return { running: running + unseen, review };
+  });
+
   /** Filter is applied client-side so switching it never spins (section 5.1). */
   const shown = $derived.by(() => {
     const all = summary?.projects ?? [];
@@ -45,10 +73,18 @@
         const deadB = b.status === 'dead' ? 1 : 0;
         if (deadA !== deadB) return deadA - deadB;
       }
-      // Projects with a running task first, then updated_at descending.
-      const runA = (a.running_tasks?.length ?? 0) > 0 ? 0 : 1;
-      const runB = (b.running_tasks?.length ?? 0) > 0 ? 0 : 1;
-      if (runA !== runB) return runA - runB;
+      // Projects with a genuinely running task first, then those with an agent
+      // waiting on Casper, then updated_at descending. Sorting on the ledger's
+      // running list floated projects whose every agent had already stopped.
+      const rank = (p: SummaryProject) => {
+        const c = liveCount(p);
+        if (c.running > 0) return 0;
+        if (c.review > 0) return 1;
+        return 2;
+      };
+      const rankA = rank(a);
+      const rankB = rank(b);
+      if (rankA !== rankB) return rankA - rankB;
       return Date.parse(b.updated_at) - Date.parse(a.updated_at);
     });
   });
@@ -115,7 +151,8 @@
 <Header title="Herdr" onGear={() => (app.settingsOpen = true)}>
   {#snippet subtitle()}
     <SummaryLine
-      running={summary?.running_tasks ?? 0}
+      running={totals.running}
+      needsReview={totals.review}
       queued={summary?.queued_tasks ?? 0}
       projects={shown.length}
       {refreshing}

@@ -1,6 +1,8 @@
 <script lang="ts">
   import StatusDot from './StatusDot.svelte';
-  import { countsLine } from '../lib/format';
+  import { liveCountsLine, statusSpec } from '../lib/format';
+  import { app } from '../lib/store.svelte';
+  import { isSettled, liveCounts, liveTaskStatus } from '../lib/live';
   import type { SummaryProject } from '../lib/types';
 
   let {
@@ -40,6 +42,17 @@
   }
 
   const running = $derived(project.running_tasks?.slice(0, 2) ?? []);
+  /** Each preview line carries its own live status, so a card cannot show a
+   *  pulsing dot next to a task whose agent stopped hours ago. */
+  const previews = $derived(
+    running.map((t) => {
+      const live = liveTaskStatus(t, app.paneIndex, app.panesKnown);
+      return { task: t, live, settled: isSettled(live) };
+    })
+  );
+  const counts = $derived(
+    liveCounts(project.task_counts, project.running_tasks ?? [], app.paneIndex, app.panesKnown)
+  );
 </script>
 
 <button
@@ -59,12 +72,15 @@
       {project.name}
     </span>
   </span>
-  <span class="t-meta counts">{countsLine(project.task_counts)}</span>
-  {#each running as task (task.id)}
+  <span class="t-meta counts">{liveCountsLine(counts)}</span>
+  {#each previews as p (p.task.id)}
     <span class="run">
       <span class="chev">▸</span>
-      <span class="t-meta title">{task.title}</span>
-      <StatusDot domain="task" value="running" size={8} />
+      <span class="t-meta title">{p.task.title}</span>
+      {#if p.settled}
+        <span class="t-meta flag">{statusSpec('live', p.live).label}</span>
+      {/if}
+      <StatusDot domain="live" value={p.live} size={8} />
     </span>
   {/each}
 </button>
@@ -127,6 +143,10 @@
     color: var(--t-tertiary);
     font-size: 11px;
     flex: none;
+  }
+  .flag {
+    flex: none;
+    color: var(--c-done);
   }
   .run .title {
     flex: 1;

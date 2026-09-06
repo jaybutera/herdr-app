@@ -21,6 +21,7 @@
   import { app } from '../lib/store.svelte';
   import { ApiError, bridge, projtrack } from '../lib/api';
   import { parsePane, type Block } from '../lib/pane-parse';
+  import { isSettled, liveTaskStatus } from '../lib/live';
   import { clockTime, dayKey, dayLabel, relativeTime, statusSpec } from '../lib/format';
   import type { AgentStatus, TaskDetail } from '../lib/types';
   import { onMount, tick } from 'svelte';
@@ -57,9 +58,39 @@
   let atBottom = $state(true);
   let showJump = $state(false);
 
+  /** The ledger crossed with the pane list, for the header and the banner. */
+  const live = $derived(task ? liveTaskStatus(task, app.paneIndex, app.panesKnown) : 'queued');
+
+  // Live mode still turns on for a ledger-running task whose agent has stopped:
+  // the transcript is the most useful thing on screen, and the composer is how
+  // Casper answers. What changes is that the header stops calling it Running and
+  // a banner says what actually happened.
   const isLive = $derived(
     !!task && !!task.session_ref && (task.status === 'running' || forceLive) && !paneGone
   );
+
+  /** The pane read is the freshest signal; fall back to the polled pane list. */
+  const headerStatus = $derived(
+    paneGone ? 'gone' : paneStatus !== 'unknown' ? paneStatus : liveToPane(live)
+  );
+
+  /** Map a live task status onto the pane vocabulary the header line speaks. */
+  function liveToPane(v: string): string {
+    if (v === 'running') return 'working';
+    if (v === 'blocked') return 'blocked';
+    if (v === 'finished') return 'done';
+    if (v === 'stalled') return 'idle';
+    if (v === 'orphan') return 'gone';
+    return 'unknown';
+  }
+
+  /** Shown when the ledger still calls this running but the agent has stopped. */
+  const staleNote = $derived.by(() => {
+    if (!task || task.status !== 'running' || !isSettled(live)) return null;
+    if (live === 'finished') return 'This agent has finished. projtrack still lists the task as running.';
+    if (live === 'stalled') return 'This agent stopped without reporting a result.';
+    return 'No live session for this task. It is still listed as running.';
+  });
   const blocks = $derived<Block[]>(paneText ? parsePane(paneText) : []);
 
   const visiblePending = $derived(
@@ -230,11 +261,7 @@
   {#snippet subtitle()}
     {#if task}
       {#if isLive}
-        <LiveStatusLine
-          agentStatus={paneGone ? 'gone' : paneStatus}
-          paneId={task.session_ref}
-          label={paneLabel}
-        />
+        <LiveStatusLine agentStatus={headerStatus} paneId={task.session_ref} label={paneLabel} />
       {:else}
         <div class="hist-status">
           <StatusDot domain="task" value={task.status} size={9} />
@@ -249,6 +276,8 @@
 
 {#if paneGone}
   <div class="pad"><ErrorBanner text="Pane gone" /></div>
+{:else if staleNote}
+  <div class="pad"><p class="t-meta stale">{staleNote}</p></div>
 {/if}
 
 {#if isLive}
@@ -392,6 +421,16 @@
   .center {
     text-align: center;
     padding: 32px 0;
+  }
+  /* The correction sits above the transcript, in done-green rather than alert
+     red: nothing is broken, the ledger is just behind. */
+  .stale {
+    margin: 6px 0 0;
+    padding: 8px 10px;
+    border-radius: var(--r-card);
+    color: var(--t-primary);
+    background: color-mix(in srgb, var(--c-done) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--c-done) 30%, var(--hairline));
   }
   .hist-status {
     display: flex;

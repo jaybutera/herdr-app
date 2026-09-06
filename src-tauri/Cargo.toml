@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.1"
+version = "0.1.2"
 description = "A phone and laptop view into the local agent fleet"
 authors = ["Casper"]
 license = ""
