@@ -244,3 +244,10 @@ textarea {
     scroll-behavior: auto !important;
   }
 }
+
+/* 4: running-task spinner. One rotating arc, matching the dot vocabulary. */
+@keyframes spin-arc {
+  to {
+    transform: rotate(360deg);
+  }
+}
