@@ -3,11 +3,38 @@
   // so this only autolinks URLs and turns pane ids into chips (section 5.4).
   // Text is rendered as text nodes, never as HTML.
   import PaneChip from './PaneChip.svelte';
+  import { isTauri } from '../lib/settings';
 
   let {
     text,
     onPane,
   }: { text: string; onPane: (paneId: string) => void } = $props();
+
+  /**
+   * Hand the URL to the phone's browser.
+   *
+   * A plain anchor is not enough on Android: `target="_blank"` has no window to
+   * open in, so the tap does nothing, and without it the WebView navigates
+   * away from the app to the page. Both leave the user stuck. The opener plugin
+   * is the only path out to the real browser, so every tap is intercepted here.
+   * The laptop build has a real browser context, so it falls back to
+   * `window.open`.
+   */
+  async function openUrl(e: MouseEvent, url: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isTauri()) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    try {
+      const m = await import('@tauri-apps/plugin-opener');
+      await m.openUrl(url);
+    } catch {
+      // Nothing sensible left to try; better than silently swallowing the tap.
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  }
 
   type Piece =
     | { t: 'text'; v: string }
@@ -35,7 +62,8 @@
   >{#each pieces as p, i (i)}{#if p.t === 'text'}{p.v}{:else if p.t === 'url'}<a
         href={p.v}
         target="_blank"
-        rel="noreferrer noopener">{p.v}</a
+        rel="noreferrer noopener"
+        onclick={(e) => void openUrl(e, p.v)}>{p.v}</a
       >{:else}<span class="chip-wrap"><PaneChip paneId={p.v} onOpen={() => onPane(p.v)} /></span
       >{/if}{/each}</span
 >
@@ -47,6 +75,12 @@
   }
   a {
     color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    /* The tap must land on the link, not scroll or select the bubble. */
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: color-mix(in srgb, var(--accent) 30%, transparent);
+    cursor: pointer;
   }
   .chip-wrap {
     display: inline-block;

@@ -28,6 +28,9 @@
   let lastSentAt = $state(0);
 
   let scroller: HTMLDivElement | undefined = $state();
+  /** The growing element. Watched directly: the scroller's own box never
+   *  changes size, only its content does. */
+  let content: HTMLDivElement | undefined = $state();
   /** True while the view is pinned to the newest message. Set false only by a
    *  real user scroll away from the bottom. */
   let atBottom = true;
@@ -68,7 +71,9 @@
       app.noteFailure();
     } finally {
       loading = false;
-      ready = true;
+      // `ready` is set by scheduleReveal once the height holds still. On the
+      // error path there is no pin to wait for, so reveal the banner directly.
+      if (error) ready = true;
     }
   }
 
@@ -140,39 +145,79 @@
   }
 
   /**
-   * Pin to the bottom once the scroller has stopped growing.
+   * Pin to the bottom and stay there.
    *
-   * `tick()` alone is not enough: it flushes Svelte's DOM update, not layout.
-   * At that point the freshly mounted bubbles are still running their `block-in`
-   * transform and the web fonts are still swapping in, so `scrollHeight` reads
-   * short and the jump lands somewhere back in history. We re-pin across a few
-   * frames and stop as soon as the height holds steady.
+   * The previous version guessed: it re-pinned for a fixed twelve frames and
+   * stopped as soon as two of them measured the same `scrollHeight`. On a long
+   * history that budget expires while the view is still growing, and a brief
+   * plateau mid-layout ends it even sooner. Everything that landed afterwards
+   * (the web fonts swapping in, `TypingDots` appearing once `/chat/state` says
+   * the orchestrator is busy, the next poll's messages) grew the scroller with
+   * nothing left watching it, which is what walked the view back into history
+   * in stages.
+   *
+   * `keepPinned` instead watches the content box for the life of the screen, so
+   * there is no budget to run out: while `atBottom` holds, any growth is
+   * answered on the frame it happens.
    */
+  function scheduleReveal() {
+    // Reveal only once the scroller has held still for two consecutive frames,
+    // so the first painted frame is already at the newest message.
+    let stable = 0;
+    let last = -1;
+    const step = () => {
+      if (!scroller) return;
+      scrollToBottom();
+      const h = scroller.scrollHeight;
+      stable = h === last ? stable + 1 : 0;
+      last = h;
+      if (stable >= 2) {
+        ready = true;
+        return;
+      }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+    // Never leave the chat invisible because the height never settles.
+    setTimeout(() => {
+      if (!ready) {
+        scrollToBottom();
+        ready = true;
+      }
+    }, 600);
+  }
+
   async function pinToBottom() {
     await tick();
     atBottom = true;
     showJump = false;
     scrollToBottom();
-    if (!scroller) return;
-    let last = scroller.scrollHeight;
-    for (let i = 0; i < 12; i++) {
-      await new Promise((r) => requestAnimationFrame(r));
-      if (!scroller) return;
-      scrollToBottom();
-      const h = scroller.scrollHeight;
-      if (h === last && i > 1) break;
-      last = h;
-    }
-    // Fonts land after their own swap; one last pin catches the reflow.
+    scheduleReveal();
+    // Fonts land after their own swap; the observer catches the reflow, but ask
+    // for the pin explicitly in case the swap changes nothing else.
     const fonts = (document as Document & { fonts?: { ready: Promise<unknown> } }).fonts;
     if (fonts?.ready) {
-      try {
-        await fonts.ready;
-      } catch {
-        // Nothing to do; the frame loop above already pinned us.
-      }
-      if (atBottom) scrollToBottom();
+      fonts.ready
+        .then(() => {
+          if (atBottom) scrollToBottom();
+        })
+        .catch(() => {
+          // Nothing to do; the observer is still watching.
+        });
     }
+  }
+
+  /**
+   * Re-pin on every content growth while the user has not scrolled away. This
+   * is what makes the fix hold for late arrivals rather than only at mount.
+   */
+  function keepPinned(el: HTMLDivElement) {
+    if (typeof ResizeObserver === 'undefined') return () => {};
+    const ro = new ResizeObserver(() => {
+      if (atBottom) scrollToBottom();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
   }
 
   function onScroll() {
@@ -194,10 +239,14 @@
 
   onMount(() => {
     void loadInitial();
+    const stopPin = content ? keepPinned(content) : () => {};
     const timer = setInterval(() => {
       if (app.visible && app.tab === 'chat') void poll();
     }, app.intervals.chat);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      stopPin();
+    };
   });
 
   let wasVisible = true;
@@ -225,49 +274,51 @@
 <div class="col">
   <div class="scrollwrap">
     <div class="scroll" class:ready bind:this={scroller} onscroll={onScroll}>
-      {#if error}
-        <ErrorBanner
-          text="Can't reach the orchestrator{error ? ` — ${error}` : ''}"
-          onRetry={() => void loadInitial()}
-        />
-      {/if}
+      <div class="content" bind:this={content}>
+        {#if error}
+          <ErrorBanner
+            text="Can't reach the orchestrator{error ? ` — ${error}` : ''}"
+            onRetry={() => void loadInitial()}
+          />
+        {/if}
 
-      {#if loading && !messages.length}
-        <Skeleton shape="bubble" />
-        <Skeleton shape="bubble" />
-        <Skeleton shape="bubble" />
-      {:else if !messages.length && !queued.length}
-        <EmptyState text="Ask what the fleet is doing" />
-      {:else}
-        {#each messages as m, i (m.id)}
-          {#if needsDivider(i)}
-            <TimeDivider label={clockTime(m.ts)} />
-          {/if}
-          <div class="row" class:fresh={m.id > historyMark}>
-            {#if m.role === 'event'}
-              <EventCard
-                kind={m.kind}
-                text={stripLeadingEmoji(m.text)}
-                paneId={m.pane_id}
-                onPane={onOpenPane}
-              />
-            {:else}
-              <ChatBubble
-                role={m.role === 'system' ? 'system' : m.role === 'user' ? 'user' : 'orchestrator'}
-                text={m.role === 'user' ? m.text : stripLeadingEmoji(m.text)}
-                onPane={onOpenPane}
-              />
+        {#if loading && !messages.length}
+          <Skeleton shape="bubble" />
+          <Skeleton shape="bubble" />
+          <Skeleton shape="bubble" />
+        {:else if !messages.length && !queued.length}
+          <EmptyState text="Ask what the fleet is doing" />
+        {:else}
+          {#each messages as m, i (m.id)}
+            {#if needsDivider(i)}
+              <TimeDivider label={clockTime(m.ts)} />
             {/if}
-          </div>
-        {/each}
-        {#each queued as q (q.at)}
-          <ChatBubble role="user" text={q.text} pending queued onPane={onOpenPane} />
-        {/each}
-      {/if}
+            <div class="row" class:fresh={m.id > historyMark}>
+              {#if m.role === 'event'}
+                <EventCard
+                  kind={m.kind}
+                  text={stripLeadingEmoji(m.text)}
+                  paneId={m.pane_id}
+                  onPane={onOpenPane}
+                />
+              {:else}
+                <ChatBubble
+                  role={m.role === 'system' ? 'system' : m.role === 'user' ? 'user' : 'orchestrator'}
+                  text={m.role === 'user' ? m.text : stripLeadingEmoji(m.text)}
+                  onPane={onOpenPane}
+                />
+              {/if}
+            </div>
+          {/each}
+          {#each queued as q (q.at)}
+            <ChatBubble role="user" text={q.text} pending queued onPane={onOpenPane} />
+          {/each}
+        {/if}
 
-      {#if typing}
-        <TypingDots />
-      {/if}
+        {#if typing}
+          <TypingDots />
+        {/if}
+      </div>
     </div>
 
     {#if showJump}

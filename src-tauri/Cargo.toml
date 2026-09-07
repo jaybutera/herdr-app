@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.3"
+version = "0.1.4"
 description = "A phone and laptop view into the local agent fleet"
 authors = ["Casper"]
 license = ""
@@ -25,3 +25,4 @@ tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-store = "2"
 tauri-plugin-http = "2.6.0"
+tauri-plugin-opener = "2"

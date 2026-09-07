@@ -7,6 +7,10 @@ pub fn run() {
         // Native HTTP, so requests leave the app instead of the WebView's
         // networking stack. See src/lib/api.ts for why.
         .plugin(tauri_plugin_http::init())
+        // Hands a tapped link to the phone's browser. A plain anchor either
+        // does nothing in the Android WebView or replaces the app with the
+        // page, so RichText routes every URL through this instead.
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
