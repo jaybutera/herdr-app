@@ -256,6 +256,144 @@ describe('a read that 404s while the pane list says the session is working', () 
   });
 });
 
+// Round 2 should-fix. The gate was "the read 404d and the agent is not busy",
+// so a single failed read against a pane the list was still holding latched
+// "Pane gone" and switched the poll off. The bridge answers 404 for every read
+// failure that is not a missing socket, its own 15 s exec timeout included, and
+// most of the fleet's ledger-running tasks sit on a pane that is idle or done.
+// Nothing then cleared it: idle and done never restarted the poll, and the poll
+// was the only thing that could have.
+describe('a read that 404s while the pane list still holds the pane', () => {
+  /** The bridge 404s the first `n` reads, then answers with `status`. */
+  function failsThenAnswers(n: number, status: 'working' | 'idle' = 'working') {
+    let left = n;
+    reads.mockImplementation(async (_s: unknown, id: string) => {
+      if (left > 0) {
+        left -= 1;
+        throw new ApiError('HTTP 404', 404);
+      }
+      return {
+        pane_id: id,
+        machine: 'box',
+        agent_status: status,
+        read_at: '2026-09-07T19:56:23Z',
+        text: '● Now the sendrawtransaction handler:',
+      };
+    });
+  }
+
+  for (const agent of ['idle', 'done'] as const) {
+    it(`does not say "Pane gone" for a listed ${agent} pane whose read failed`, async () => {
+      app.setPanes([{ ...BOX_PANE, agent_status: agent }]);
+      app.setMachines(MACHINES);
+      app.panesKnown = true;
+      reads.mockImplementation(async () => {
+        throw new ApiError('HTTP 404', 404);
+      });
+
+      draw();
+      await flush();
+
+      expect(reads).toHaveBeenCalled();
+      expect(screen.queryByText('Pane gone')).toBeNull();
+    });
+
+    it(`keeps polling a listed ${agent} pane after a failed read`, async () => {
+      app.setPanes([{ ...BOX_PANE, agent_status: agent }]);
+      app.setMachines(MACHINES);
+      app.panesKnown = true;
+      reads.mockImplementation(async () => {
+        throw new ApiError('HTTP 404', 404);
+      });
+
+      draw();
+      await flush();
+      const afterFirst = reads.mock.calls.length;
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flush();
+
+      expect(reads.mock.calls.length).toBeGreaterThan(afterFirst);
+    });
+
+    it(`recovers on the next successful read of a listed ${agent} pane`, async () => {
+      // The live case: the pane sits idle in the list, one read times out and
+      // the bridge maps it to 404, and the next one answers. The screen has to
+      // correct itself where it stands, with nothing navigating away.
+      app.setPanes([{ ...BOX_PANE, agent_status: agent }]);
+      app.setMachines(MACHINES);
+      app.panesKnown = true;
+      failsThenAnswers(1, 'idle');
+
+      draw();
+      await flush();
+      expect(screen.queryByText(/sendrawtransaction/)).toBeNull();
+      expect(screen.queryByText('Pane gone')).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(6000);
+      await flush();
+
+      expect(screen.getByText(/sendrawtransaction/)).toBeTruthy();
+      expect(screen.queryByText('Pane gone')).toBeNull();
+    });
+  }
+
+  it('keeps the last transcript through a failed read', async () => {
+    // Section 9: the transcript is never cleared. A read that 404s against a
+    // listed pane must not take the text down with it.
+    app.setPanes([{ ...BOX_PANE, agent_status: 'idle' }]);
+    app.setMachines(MACHINES);
+    app.panesKnown = true;
+
+    let answered = false;
+    reads.mockImplementation(async (_s: unknown, id: string) => {
+      if (answered) throw new ApiError('HTTP 404', 404);
+      answered = true;
+      return {
+        pane_id: id,
+        machine: 'box',
+        agent_status: 'idle' as const,
+        read_at: '2026-09-07T19:56:23Z',
+        text: '● Now the sendrawtransaction handler:',
+      };
+    });
+
+    draw();
+    await flush();
+    expect(screen.getByText(/sendrawtransaction/)).toBeTruthy();
+
+    await vi.advanceTimersByTimeAsync(12_000);
+    await flush();
+
+    expect(screen.getByText(/sendrawtransaction/)).toBeTruthy();
+    expect(screen.queryByText('Pane gone')).toBeNull();
+  });
+
+  it('latches once the list itself drops the pane', async () => {
+    // The list is what decides. While it holds the pane the 404s are retried;
+    // the moment it stops holding it, the same 404 is believed.
+    app.setPanes([{ ...BOX_PANE, agent_status: 'idle' }]);
+    app.setMachines(MACHINES);
+    app.panesKnown = true;
+    reads.mockImplementation(async () => {
+      throw new ApiError('HTTP 404', 404);
+    });
+
+    draw();
+    await flush();
+    expect(screen.queryByText('Pane gone')).toBeNull();
+
+    app.setPanes([]);
+    await flush();
+
+    expect(screen.getByText('Pane gone')).toBeTruthy();
+    const stopped = reads.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flush();
+    expect(reads.mock.calls.length).toBe(stopped);
+  });
+});
+
 // Should-fix 2. The other side of the same coin. A 404 the pane list agrees with
 // is an answer, and re-asking costs the bridge a `herdr pane read` exec every
 // pane interval, over the ssh forward when the machine is remote.

@@ -106,14 +106,29 @@
   // Casper answers. What changes is that the header stops calling it Running and
   // a banner says what actually happened.
   /**
-   * A 404 from the pane read, believed only while the pane list agrees.
+   * Whether the pane list holds this pane. `undefined` until the list arrives.
+   *
+   * This, and not the agent's state, is what says a pane exists. A pane the list
+   * holds is there whether its agent is working, blocked, idle or done; asking
+   * about the agent instead conflated "the list has dropped it" with "the list
+   * has it and it is not busy", and the second is most of the fleet.
+   */
+  const paneListed = $derived(
+    !app.panesKnown || refPending || !bridgePaneId ? undefined : app.paneIndex.has(bridgePaneId)
+  );
+
+  /**
+   * A 404 from the pane read, believed only when the pane list has dropped the
+   * pane too.
    *
    * The list is the same signal every other screen judges this task by, and it
-   * addresses the pane by the id the bridge itself issued. When it still shows
-   * the session working, a 404 from the read is the stale half; letting it win
-   * is what put "Pane gone" on a session that was running on box.
+   * addresses the pane by the id the bridge itself issued. While it still holds
+   * the pane, a 404 from the read is a failed read: the bridge answers 404 for
+   * anything that is not a missing socket, its own 15 s exec timeout included.
+   * Letting one win is what put "Pane gone" on a session that was running on
+   * box, and then on every listed-but-idle pane whose read timed out once.
    */
-  const paneReallyGone = $derived(paneIsGone(paneGone, live));
+  const paneReallyGone = $derived(paneIsGone(paneGone, paneListed));
 
   const isLive = $derived(
     !!task && !!task.session_ref && (task.status === 'running' || forceLive) && !paneReallyGone

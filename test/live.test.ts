@@ -137,31 +137,35 @@ describe('liveCounts', () => {
 });
 
 // The pane-gone bug, reported from the live system: task 103 on box showed
-// "pane gone" while its agent was working in pane wC:p1. Two things caused it,
-// and each has its own guard below.
+// "pane gone" while its agent was working in pane wC:p1. The 404 was believed
+// over the pane list, which was holding the pane the whole time.
 describe('paneIsGone', () => {
-  it('does not believe a 404 while the pane list says the agent is working', () => {
+  it('does not believe a 404 for a pane the list is still holding', () => {
     // The exact shape of the bug: the read asked for the untranslated ref and
-    // got 404 for a session the pane list can see running on box.
-    expect(paneIsGone(true, 'running')).toBe(false);
+    // got 404 for a session the pane list can see on box.
+    expect(paneIsGone(true, true)).toBe(false);
   });
 
-  it('does not believe a 404 while the pane list says the agent is blocked', () => {
-    expect(paneIsGone(true, 'blocked')).toBe(false);
+  it('believes a 404 once the pane list has dropped the pane', () => {
+    expect(paneIsGone(true, false)).toBe(true);
   });
 
-  it('believes a 404 once the pane list agrees the session is gone', () => {
-    expect(paneIsGone(true, 'orphan')).toBe(true);
+  // The bridge answers 404 for every read failure that is not a missing socket,
+  // its own 15 s exec timeout included. So a 404 against a listed pane says
+  // nothing about whether the pane exists, whatever its agent is doing, and a
+  // pane that is idle or done is the fleet's ordinary state rather than a
+  // dying one.
+  it('does not believe a 404 for a listed pane whose agent has stopped', () => {
+    expect(paneIsGone(true, true)).toBe(false);
   });
 
-  it('believes a 404 for a session that has stopped', () => {
-    expect(paneIsGone(true, 'finished')).toBe(true);
-    expect(paneIsGone(true, 'stalled')).toBe(true);
+  it('believes nothing while the pane list has not arrived', () => {
+    expect(paneIsGone(true, undefined)).toBe(false);
   });
 
   it('is false whenever the read did not 404 at all', () => {
-    for (const s of ['running', 'blocked', 'finished', 'stalled', 'orphan'] as const) {
-      expect(paneIsGone(false, s)).toBe(false);
+    for (const listed of [true, false, undefined]) {
+      expect(paneIsGone(false, listed)).toBe(false);
     }
   });
 });
@@ -185,14 +189,14 @@ describe('shouldPollPane', () => {
   // given can express that case: it is tested against the real screen in
   // test/task-detail.component.test.ts, where a bridge 404s and then answers.
   //
-  // What is an argument is `paneReallyGone`, the 404 the pane list corroborated.
-  // Gating on that does not latch, because the pane list keeps arriving whether
-  // or not this screen reads anything.
-  it('stops polling once the pane list agrees the pane is gone', () => {
+  // What is an argument is `paneReallyGone`, a 404 for a pane the list has
+  // dropped. Gating on that does not latch, because the pane list keeps arriving
+  // whether or not this screen reads anything.
+  it('stops polling once the pane list has dropped the pane', () => {
     expect(shouldPollPane({ ...base, paneReallyGone: true })).toBe(false);
   });
 
-  it('polls again as soon as the pane list stops agreeing', () => {
+  it('polls again as soon as the list holds the pane again', () => {
     expect(shouldPollPane({ ...base, paneReallyGone: false })).toBe(true);
   });
 

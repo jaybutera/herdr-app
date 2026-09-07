@@ -137,17 +137,32 @@ export function liveCounts(
 /**
  * Whether a 404 from the pane read should be believed.
  *
- * The read addresses one pane and answers about that pane alone; the pane list
- * is the same signal every other screen judges the task by, and it carries the
- * ids the bridge itself issued. When the list still shows the session working,
- * a 404 from the read is the stale half of a disagreement, not news.
+ * The pane list decides, and only the pane list. The read addresses one pane and
+ * answers about that pane alone; the list carries the ids the bridge itself
+ * issued and is the same signal every other screen judges the task by. A pane
+ * the list still holds is not gone, whatever its agent is doing, so a 404
+ * against it is a failed read and not news.
  *
- * This is the bug that put "Pane gone" on task 103 while its agent was working
- * in pane wC:p1 on box: the read asked for the untranslated ref `box:wC:p1`,
- * an id the bridge has never issued, and got 404 back for a live session.
+ * That distinction matters because the bridge cannot tell the two apart. It maps
+ * every failure of `herdr pane read` other than a missing socket to 404
+ * (`app-api.mjs:185`), the 15 s exec timeout included (`machines.mjs:29`,
+ * `machines.mjs:117`). Keying on the agent's state instead let one such timeout
+ * against a listed-but-idle pane latch "Pane gone" and switch off the poll: idle
+ * and done never restart it, because only a later working or blocked reading
+ * cleared the old gate. Most of the fleet's ledger-running tasks sit idle or
+ * done, so that was the common case, not the rare one.
+ *
+ * `listed` is three-valued on purpose. `undefined` means the list has not
+ * arrived, which is not the same as the list not holding the pane; in that
+ * window nothing is believed and the last transcript stays up.
+ *
+ * This is also still the fix for task 103, which read "Pane gone" while its
+ * agent worked in pane wC:p1 on box: the read asked for the untranslated ref
+ * `box:wC:p1`, an id the bridge has never issued, and got 404 back for a live
+ * session the list was holding all along.
  */
-export function paneIsGone(paneGone: boolean, live: LiveTaskStatus): boolean {
-  return paneGone && live !== 'running' && live !== 'blocked';
+export function paneIsGone(paneGone: boolean, listed: boolean | undefined): boolean {
+  return paneGone && listed === false;
 }
 
 /**
@@ -160,12 +175,12 @@ export function paneIsGone(paneGone: boolean, live: LiveTaskStatus): boolean {
  * mind.
  *
  * `paneReallyGone` is a different signal and safe to gate on. It is `paneIsGone`,
- * a 404 the pane list has corroborated, and the list keeps arriving from
- * App's own poll whether or not this screen reads anything. So a pane that comes
- * back turns the gate off again, while a ledger-running task whose pane is
- * genuinely gone stops firing a read every pane interval. Each of those reads
- * costs the bridge a `herdr pane read` exec, over the ssh forward for a remote
- * machine, to be told the same 404 again.
+ * a 404 for a pane the list has dropped, and the list keeps arriving from App's
+ * own poll whether or not this screen reads anything. So a pane the list holds
+ * again turns the gate off, whatever its agent is doing, while a ledger-running
+ * task whose pane is genuinely gone stops firing a read every pane interval.
+ * Each of those reads costs the bridge a `herdr pane read` exec, over the ssh
+ * forward for a remote machine, to be told the same 404 again.
  */
 export function shouldPollPane(opts: {
   hasSession: boolean;
