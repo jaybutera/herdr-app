@@ -21,8 +21,8 @@
   import { app } from '../lib/store.svelte';
   import { ApiError, bridge, projtrack } from '../lib/api';
   import { parsePane, type Block } from '../lib/pane-parse';
-  import { machineForRef, paneIdForRef } from '../lib/pane-id';
-  import { isSettled, liveTaskStatus } from '../lib/live';
+  import { isRefUnresolved, machineForRef, paneIdForRef } from '../lib/pane-id';
+  import { isSettled, liveTaskStatus, paneIsGone, shouldPollPane } from '../lib/live';
   import { clockTime, dayKey, dayLabel, relativeTime, statusSpec } from '../lib/format';
   import type { AgentStatus, TaskDetail } from '../lib/types';
   import { onMount, tick } from 'svelte';
@@ -69,6 +69,14 @@
   const bridgePaneId = $derived(paneIdForRef(task?.session_ref, app.machineNames));
   /** Which machine this session is on, shown when it is not this laptop. */
   const sessionMachine = $derived(machineForRef(task?.session_ref, app.machineNames));
+  /**
+   * True while a `<machine>:<id>` ref has no machine list to resolve against.
+   *
+   * Reading the pane in this window asks the bridge for `box:wC:p1`, an id it
+   * has never issued, and gets HTTP 404 back for a session that is working.
+   * Nothing calls the bridge until the list lands.
+   */
+  const refPending = $derived(isRefUnresolved(task?.session_ref, app.machineNames));
 
   /** The ledger crossed with the pane list, for the header and the banner. */
   const live = $derived(task ? liveTaskStatus(task, app.paneIndex, app.panesKnown, app.machineNames) : 'queued');
@@ -77,13 +85,42 @@
   // the transcript is the most useful thing on screen, and the composer is how
   // Casper answers. What changes is that the header stops calling it Running and
   // a banner says what actually happened.
+  /**
+   * A 404 from the pane read, believed only while the pane list agrees.
+   *
+   * The list is the same signal every other screen judges this task by, and it
+   * addresses the pane by the id the bridge itself issued. When it still shows
+   * the session working, a 404 from the read is the stale half; letting it win
+   * is what put "Pane gone" on a session that was running on box.
+   */
+  const paneReallyGone = $derived(paneIsGone(paneGone, live));
+
   const isLive = $derived(
-    !!task && !!task.session_ref && (task.status === 'running' || forceLive) && !paneGone
+    !!task && !!task.session_ref && (task.status === 'running' || forceLive) && !paneReallyGone
+  );
+
+  /**
+   * Whether the pane poll should run.
+   *
+   * Deliberately not `isLive`: that goes false the moment `paneGone` is set, so
+   * gating the timer on it made a single 404 permanent — the only code that
+   * clears `paneGone` is the read the gate had just switched off. A pane that
+   * comes back, or a 404 that was only ever the unresolved-ref race, then had
+   * no way to correct itself short of leaving the screen. The poll keeps
+   * running while the task claims a session; the read itself is what decides.
+   */
+  const shouldPoll = $derived(
+    shouldPollPane({
+      hasSession: !!task && !!task.session_ref,
+      ledgerRunning: task?.status === 'running',
+      forceLive,
+      refPending,
+    })
   );
 
   /** The pane read is the freshest signal; fall back to the polled pane list. */
   const headerStatus = $derived(
-    paneGone ? 'gone' : paneStatus !== 'unknown' ? paneStatus : liveToPane(live)
+    paneReallyGone ? 'gone' : paneStatus !== 'unknown' ? paneStatus : liveToPane(live)
   );
 
   /** Map a live task status onto the pane vocabulary the header line speaks. */
@@ -125,6 +162,9 @@
   async function readPane() {
     const paneId = bridgePaneId;
     if (!paneId) return;
+    // The machine list has not arrived, so `paneId` is not yet the id the
+    // bridge knows. Asking anyway returns 404 for a live session.
+    if (refPending) return;
     try {
       const r = await bridge.read(app.settings, paneId);
       // Re-render only when the text actually changed (section 5.3a).
@@ -157,6 +197,9 @@
   /** A finished task whose pane is still alive gets an "Open session" button. */
   async function checkSession() {
     if (!task?.session_ref || task.status === 'running') return;
+    // Same unresolved-ref race as readPane: a 404 here would report a live
+    // session on another machine as dead.
+    if (refPending) return;
     try {
       const p = await bridge.pane(app.settings, bridgePaneId);
       sessionAlive = true;
@@ -241,8 +284,9 @@
       void checkSession();
       if (task?.status === 'running' && task.session_ref) void readPane();
     });
+
     const paneTimer = setInterval(() => {
-      if (app.visible && isLive) void readPane();
+      if (app.visible && shouldPoll) void readPane();
     }, app.intervals.pane);
     const taskTimer = setInterval(() => {
       if (app.visible) void loadTask();
@@ -256,8 +300,24 @@
   let wasVisible = true;
   $effect(() => {
     const now = app.visible;
-    if (now && !wasVisible && isLive) void readPane();
+    if (now && !wasVisible && shouldPoll) void readPane();
     wasVisible = now;
+  });
+
+  // The first read of a remote session usually cannot happen on mount: the
+  // machine list comes from App's own poll and may land after this screen does.
+  // Reading on the edge where the ref becomes resolvable shows a box task's
+  // transcript as soon as the list arrives, rather than a pane interval later.
+  // It also clears a `paneGone` left over from a read that raced the list.
+  let wasPending = false;
+  $effect(() => {
+    const pending = refPending;
+    if (wasPending && !pending) {
+      paneGone = false;
+      if (shouldPoll) void readPane();
+      else void checkSession();
+    }
+    wasPending = pending;
   });
 
   // Opening the live view of a still-alive finished session starts its poll.
@@ -291,7 +351,7 @@
   {/snippet}
 </Header>
 
-{#if paneGone}
+{#if paneReallyGone}
   <div class="pad"><ErrorBanner text="Pane gone" /></div>
 {:else if staleNote}
   <div class="pad"><p class="t-meta stale">{staleNote}</p></div>
@@ -349,14 +409,14 @@
     {/if}
     <Composer
       placeholder="Message this session…"
-      disabled={paneGone}
+      disabled={paneReallyGone}
       onSend={sendText}
       onFocusChange={onComposerFocus}
     />
     <QuickKeys
       onKey={sendKey}
       onText={sendDigit}
-      disabled={paneGone}
+      disabled={paneReallyGone}
       alertDigits={paneStatus === 'blocked'}
     />
   </div>

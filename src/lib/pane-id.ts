@@ -66,3 +66,32 @@ export function machineForRef(ref: string | null | undefined, machines: readonly
 export function isRemote(machine: string): boolean {
   return !!machine && machine !== LOCAL;
 }
+
+/**
+ * True when `ref` cannot be turned into a bridge pane id yet.
+ *
+ * A ref like `box:wC:p1` only resolves once the machine list names `box`;
+ * until then it parses as the local id `box:wC:p1`, which no bridge knows.
+ * Asking the bridge about that id gets HTTP 404 "pane gone" for a session that
+ * is running fine, so a caller that reaches a pane has to wait rather than
+ * treat the miss as an answer.
+ *
+ * A local ref is never unresolved: `w95:p1` addresses the same pane whether or
+ * not the machine list has arrived.
+ */
+export function isRefUnresolved(
+  ref: string | null | undefined,
+  machines: readonly string[]
+): boolean {
+  const text = String(ref ?? '');
+  if (!text) return false;
+  // Already resolved against a known machine, or genuinely local.
+  if (parseSessionRef(text, machines).machine !== LOCAL) return false;
+  // A colon-prefixed head that is not a known machine is either a local pane id
+  // (`w95:p1`) or a remote one whose machine has not been listed yet. Only the
+  // second is worth waiting on, and the two are told apart by whether any
+  // machine list has arrived at all.
+  const colon = text.indexOf(':');
+  if (colon <= 0) return false;
+  return machines.length === 0;
+}

@@ -133,3 +133,37 @@ export function liveCounts(
   const unseen = Math.max(0, base.running - runningTasks.length);
   return { ...base, running: stillRunning + unseen, needsReview };
 }
+
+/**
+ * Whether a 404 from the pane read should be believed.
+ *
+ * The read addresses one pane and answers about that pane alone; the pane list
+ * is the same signal every other screen judges the task by, and it carries the
+ * ids the bridge itself issued. When the list still shows the session working,
+ * a 404 from the read is the stale half of a disagreement, not news.
+ *
+ * This is the bug that put "Pane gone" on task 103 while its agent was working
+ * in pane wC:p1 on box: the read asked for the untranslated ref `box:wC:p1`,
+ * an id the bridge has never issued, and got 404 back for a live session.
+ */
+export function paneIsGone(paneGone: boolean, live: LiveTaskStatus): boolean {
+  return paneGone && live !== 'running' && live !== 'blocked';
+}
+
+/**
+ * Whether the pane poll should keep running.
+ *
+ * Deliberately not the same condition as the live view. Gating the poll on a
+ * flag that a 404 sets makes that 404 permanent: the only thing that can clear
+ * it is the read the gate has just switched off. The poll runs while the task
+ * claims a session and the ref can be addressed; what the read finds is then
+ * free to change its mind.
+ */
+export function shouldPollPane(opts: {
+  hasSession: boolean;
+  ledgerRunning: boolean;
+  forceLive: boolean;
+  refPending: boolean;
+}): boolean {
+  return opts.hasSession && (opts.ledgerRunning || opts.forceLive) && !opts.refPending;
+}

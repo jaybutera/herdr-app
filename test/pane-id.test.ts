@@ -9,7 +9,13 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { isRemote, machineForRef, paneIdForRef, parseSessionRef } from '../src/lib/pane-id';
+import {
+  isRefUnresolved,
+  isRemote,
+  machineForRef,
+  paneIdForRef,
+  parseSessionRef,
+} from '../src/lib/pane-id';
 import { liveTaskStatus, paneIndex } from '../src/lib/live';
 import type { Pane, Task } from '../src/lib/types';
 
@@ -130,5 +136,45 @@ describe('liveTaskStatus across machines', () => {
   it('a remote pane waiting on Casper reads as blocked', () => {
     const panes = paneIndex([pane('box/w6:p1', 'box', 'blocked')]);
     expect(liveTaskStatus(task('box:w6:p1'), panes, true, MACHINES)).toBe('blocked');
+  });
+});
+
+// The pane-gone bug: task 103's ref is `box:wC:p1`, and before /machines names
+// `box` that parses as the local id `box:wC:p1`. The bridge has never issued
+// that id, answers HTTP 404 "pane gone", and a session working on box was
+// reported as dead. Anything that calls the bridge has to know it is in that
+// window rather than believe the 404.
+describe('isRefUnresolved', () => {
+  it('is true for a remote ref before the machine list arrives', () => {
+    expect(isRefUnresolved('box:wC:p1', [])).toBe(true);
+  });
+
+  it('is false once the machine list names the machine', () => {
+    expect(isRefUnresolved('box:wC:p1', MACHINES)).toBe(false);
+  });
+
+  it('is false for a local pane id whatever the machine list says', () => {
+    // `w95:p1` addresses the same pane before and after the list lands, so
+    // waiting on it would stall a local session for no reason.
+    expect(isRefUnresolved('w95:p1', MACHINES)).toBe(false);
+    expect(isRefUnresolved('w95:p1', [])).toBe(true);
+  });
+
+  it('is false for a ref with no colon to split on', () => {
+    expect(isRefUnresolved('93ee19ff', [])).toBe(false);
+    expect(isRefUnresolved('93ee19ff', MACHINES)).toBe(false);
+  });
+
+  it('is false for an empty or missing ref', () => {
+    for (const ref of ['', null, undefined]) {
+      expect(isRefUnresolved(ref, [])).toBe(false);
+      expect(isRefUnresolved(ref, MACHINES)).toBe(false);
+    }
+  });
+
+  it('is false for a machine list that has arrived without the machine in it', () => {
+    // The list answered and does not name `zzz`, so the ref is as resolved as
+    // it will get: waiting longer would never change the answer.
+    expect(isRefUnresolved('zzz:w1:p1', MACHINES)).toBe(false);
   });
 });
