@@ -103,7 +103,14 @@ export function countLive(
 
 /**
  * The task counts a project card shows, with the ledger's `running` bucket
- * split into what is still running and what has quietly stopped.
+ * split into what is still running, what is waiting on Casper, and what has
+ * quietly stopped.
+ *
+ * Blocked gets its own figure rather than joining `needsReview`. A blocked agent
+ * is stopped at a question and a stalled one is stopped for good; the card's
+ * rows have said so since blocked rows got the alert glyph and the label "Needs
+ * you", and a counts line reading "1 needs review" directly above a row reading
+ * "Needs you" described the same task two ways.
  */
 export function liveCounts(
   counts: TaskCounts | undefined,
@@ -111,7 +118,7 @@ export function liveCounts(
   panes: PaneIndex,
   panesKnown: boolean,
   machines: readonly string[] = []
-): TaskCounts & { needsReview: number } {
+): TaskCounts & { blocked: number; needsReview: number } {
   const base: TaskCounts = {
     queued: counts?.queued ?? 0,
     running: counts?.running ?? 0,
@@ -119,17 +126,92 @@ export function liveCounts(
     failed: counts?.failed ?? 0,
     abandoned: counts?.abandoned ?? 0,
   };
-  if (!panesKnown) return { ...base, needsReview: 0 };
+  if (!panesKnown) return { ...base, blocked: 0, needsReview: 0 };
 
   // Only the tasks we can actually see the panes for can be reclassified; a
   // project whose running list is truncated keeps the rest in `running`.
   let stillRunning = 0;
+  let blocked = 0;
   let needsReview = 0;
   for (const t of runningTasks) {
     const s = liveTaskStatus(t, panes, panesKnown, machines);
     if (s === 'running') stillRunning += 1;
+    else if (s === 'blocked') blocked += 1;
     else needsReview += 1;
   }
   const unseen = Math.max(0, base.running - runningTasks.length);
-  return { ...base, running: stillRunning + unseen, needsReview };
+  return { ...base, running: stillRunning + unseen, blocked, needsReview };
+}
+
+/**
+ * Whether a 404 from the pane read should be believed.
+ *
+ * The pane list decides, and only the pane list. The read addresses one pane and
+ * answers about that pane alone; the list carries the ids the bridge itself
+ * issued and is the same signal every other screen judges the task by. A pane
+ * the list still holds is not gone, whatever its agent is doing, so a 404
+ * against it is a failed read and not news.
+ *
+ * That distinction matters because the bridge cannot tell the two apart. It maps
+ * every failure of `herdr pane read` other than a missing socket to 404
+ * (`app-api.mjs:185`), the 15 s exec timeout included (`machines.mjs:29`,
+ * `machines.mjs:117`). Keying on the agent's state instead let one such timeout
+ * against a listed-but-idle pane latch "Pane gone" and switch off the poll: idle
+ * and done never restart it, because only a later working or blocked reading
+ * cleared the old gate. Most of the fleet's ledger-running tasks sit idle or
+ * done, so that was the common case, not the rare one.
+ *
+ * `listed` is three-valued on purpose. `undefined` means the list has not
+ * arrived, which is not the same as the list not holding the pane; in that
+ * window nothing is believed and the last transcript stays up.
+ *
+ * This is also still the fix for task 103, which read "Pane gone" while its
+ * agent worked in pane wC:p1 on box: the read asked for the untranslated ref
+ * `box:wC:p1`, an id the bridge has never issued, and got 404 back for a live
+ * session the list was holding all along.
+ */
+export function paneIsGone(paneGone: boolean, listed: boolean | undefined): boolean {
+  return paneGone && listed === false;
+}
+
+/**
+ * Whether the pane poll should keep running.
+ *
+ * Deliberately not gated on the 404 itself. Gating the poll on a flag that a 404
+ * sets makes that 404 permanent: the only thing that can clear it is the read
+ * the gate has just switched off. The poll runs while the task claims a session
+ * and the ref can be addressed; what the read finds is then free to change its
+ * mind.
+ *
+ * `paneReallyGone` is a different signal and safe to gate on. It is `paneIsGone`,
+ * a 404 for a pane the list has dropped, and the list keeps arriving from App's
+ * own poll whether or not this screen reads anything. So a pane the list holds
+ * again turns the gate off, whatever its agent is doing, while a ledger-running
+ * task whose pane is genuinely gone stops firing a read every pane interval.
+ * Each of those reads costs the bridge a `herdr pane read` exec, over the ssh
+ * forward for a remote machine, to be told the same 404 again.
+ *
+ * `machineListedDown` is the same shape of argument and gates for the same
+ * reason: a read against a machine /machines marks unreachable can only come
+ * back 503, and no pane on that machine can be reached until the machine is. It
+ * is deliberately the /machines flag alone, never the 503 the read itself
+ * returns. That flag would be another latch set by the very call the gate
+ * switches off; /machines keeps arriving from App's poll, so the moment the
+ * machine answers again the poll resumes on its own.
+ */
+export function shouldPollPane(opts: {
+  hasSession: boolean;
+  ledgerRunning: boolean;
+  forceLive: boolean;
+  refPending: boolean;
+  paneReallyGone?: boolean;
+  machineListedDown?: boolean;
+}): boolean {
+  return (
+    opts.hasSession &&
+    (opts.ledgerRunning || opts.forceLive) &&
+    !opts.refPending &&
+    !opts.paneReallyGone &&
+    !opts.machineListedDown
+  );
 }

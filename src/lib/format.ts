@@ -72,6 +72,9 @@ const PANE: Record<string, StatusSpec> = {
   done: { color: 'var(--c-done)', glyph: 'check', label: 'Finished' },
   unknown: { color: 'var(--c-dead)', glyph: 'question', label: 'No agent' },
   gone: { color: 'var(--c-dead)', glyph: 'slashed', label: 'Pane gone' },
+  // Nothing has been read yet and the ref cannot be looked up in the pane list
+  // either, so neither "Working" nor "No agent" is a claim the app can make.
+  pending: { color: 'var(--c-muted)', glyph: 'hollow', label: 'Finding session' },
 };
 
 /**
@@ -118,8 +121,14 @@ export function countsLine(counts: TaskCounts | undefined): string {
  * The counts line with the ledger's running bucket split by what the panes say.
  * "1 running · 2 need review" instead of "3 running", so a card never claims
  * work is in flight when every one of its agents has stopped.
+ *
+ * A blocked agent gets "1 needs you" rather than joining the review figure. It
+ * is the phrase the blocked row directly below already uses, and it is what
+ * distinguishes an agent stopped at a question from one stopped for good.
  */
-export function liveCountsLine(counts: (TaskCounts & { needsReview: number }) | undefined): string {
+export function liveCountsLine(
+  counts: (TaskCounts & { blocked?: number; needsReview: number }) | undefined
+): string {
   const order: [keyof TaskCounts, string][] = [
     ['running', 'running'],
     ['queued', 'queued'],
@@ -132,6 +141,9 @@ export function liveCountsLine(counts: (TaskCounts & { needsReview: number }) | 
     .map(([k, word]) => `${counts?.[k]} ${word}`);
   const review = counts?.needsReview ?? 0;
   if (review > 0) parts.splice(1, 0, `${review} need${review === 1 ? 's' : ''} review`);
+  // Ahead of the review figure, and of running: it is the one that wants doing.
+  const blocked = counts?.blocked ?? 0;
+  if (blocked > 0) parts.unshift(`${blocked} needs you`);
   return parts.length ? parts.join(' · ') : 'No tasks yet';
 }
 

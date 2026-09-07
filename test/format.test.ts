@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { countsLine, relativeTime, statusSpec, stripLeadingEmoji } from '../src/lib/format';
+import {
+  countsLine,
+  liveCountsLine,
+  relativeTime,
+  statusSpec,
+  stripLeadingEmoji,
+} from '../src/lib/format';
 
 const NOW = Date.parse('2026-09-06T18:00:00Z');
 
@@ -50,6 +56,16 @@ describe('statusSpec', () => {
   it('falls back rather than throwing on a status it has never seen', () => {
     expect(statusSpec('pane', 'brand-new-state').label).toBe('Unknown');
   });
+
+  // Nit 2. The header needs a word for "the ref has not resolved, so nothing has
+  // been read and the pane list cannot be looked up either". Both of the words
+  // it had claim something: "Working" that an agent is mid-turn, "No agent" that
+  // there is none.
+  it('has a word for a session that has not been located yet', () => {
+    expect(statusSpec('pane', 'pending').label).toBe('Finding session');
+    expect(statusSpec('pane', 'pending').label).not.toBe(statusSpec('pane', 'working').label);
+    expect(statusSpec('pane', 'pending').label).not.toBe(statusSpec('pane', 'unknown').label);
+  });
 });
 
 describe('stripLeadingEmoji', () => {
@@ -59,5 +75,35 @@ describe('stripLeadingEmoji', () => {
   });
   it('leaves ordinary text alone', () => {
     expect(stripLeadingEmoji('the build is green')).toBe('the build is green');
+  });
+});
+
+// Nit 1, round 2. The blocked row on the card reads "Needs you"; the counts line
+// above it read "1 needs review", which is what a stalled task earns.
+describe('liveCountsLine', () => {
+  const base = { queued: 0, running: 0, done: 0, failed: 0, abandoned: 0, needsReview: 0 };
+
+  it('says "needs you" for a blocked agent, not "needs review"', () => {
+    const line = liveCountsLine({ ...base, blocked: 1 });
+    expect(line).toBe('1 needs you');
+    expect(line).not.toContain('review');
+  });
+
+  it('puts the blocked figure first, ahead of work in flight', () => {
+    expect(liveCountsLine({ ...base, running: 2, blocked: 1 })).toBe('1 needs you · 2 running');
+  });
+
+  it('keeps blocked and needs-review as separate figures', () => {
+    expect(liveCountsLine({ ...base, running: 1, blocked: 1, needsReview: 2 })).toBe(
+      '1 needs you · 1 running · 2 need review'
+    );
+  });
+
+  it('leaves the line alone when nothing is blocked', () => {
+    expect(liveCountsLine({ ...base, running: 1, needsReview: 2 })).toBe('1 running · 2 need review');
+  });
+
+  it('still reads a card with no tasks at all', () => {
+    expect(liveCountsLine({ ...base, blocked: 0 })).toBe('No tasks yet');
   });
 });

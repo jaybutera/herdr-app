@@ -3,7 +3,15 @@
 // treated as live truth. Each case below is one way that divergence appears.
 
 import { describe, expect, it } from 'vitest';
-import { countLive, isSettled, liveCounts, liveTaskStatus, paneIndex } from '../src/lib/live';
+import {
+  countLive,
+  isSettled,
+  liveCounts,
+  liveTaskStatus,
+  paneIndex,
+  paneIsGone,
+  shouldPollPane,
+} from '../src/lib/live';
 import type { AgentStatus, Pane, Task } from '../src/lib/types';
 
 function task(over: Partial<Task> = {}): Task {
@@ -125,5 +133,142 @@ describe('liveCounts', () => {
     const out = liveCounts(counts, [task()], idx(), false);
     expect(out.running).toBe(2);
     expect(out.needsReview).toBe(0);
+  });
+});
+
+// The pane-gone bug, reported from the live system: task 103 on box showed
+// "pane gone" while its agent was working in pane wC:p1. The 404 was believed
+// over the pane list, which was holding the pane the whole time.
+describe('paneIsGone', () => {
+  it('does not believe a 404 for a pane the list is still holding', () => {
+    // The exact shape of the bug: the read asked for the untranslated ref and
+    // got 404 for a session the pane list can see on box.
+    expect(paneIsGone(true, true)).toBe(false);
+  });
+
+  it('believes a 404 once the pane list has dropped the pane', () => {
+    expect(paneIsGone(true, false)).toBe(true);
+  });
+
+  // The bridge answers 404 for every read failure that is not a missing socket,
+  // its own 15 s exec timeout included. So a 404 against a listed pane says
+  // nothing about whether the pane exists, whatever its agent is doing, and a
+  // pane that is idle or done is the fleet's ordinary state rather than a
+  // dying one.
+  it('does not believe a 404 for a listed pane whose agent has stopped', () => {
+    expect(paneIsGone(true, true)).toBe(false);
+  });
+
+  it('believes nothing while the pane list has not arrived', () => {
+    expect(paneIsGone(true, undefined)).toBe(false);
+  });
+
+  it('is false whenever the read did not 404 at all', () => {
+    for (const listed of [true, false, undefined]) {
+      expect(paneIsGone(false, listed)).toBe(false);
+    }
+  });
+});
+
+// Nit 1, round 2. The card's blocked row says "Needs you" and the counts line
+// above it said "1 needs review", the phrase a stalled task earns. One task,
+// two descriptions.
+describe('liveCounts and a blocked agent', () => {
+  const i = idx(['w1:p1', 'blocked'], ['w2:p1', 'idle'], ['w3:p1', 'working']);
+  const tasks = [
+    task({ id: 1, session_ref: 'w1:p1' }),
+    task({ id: 2, session_ref: 'w2:p1' }),
+    task({ id: 3, session_ref: 'w3:p1' }),
+  ];
+  const counts = { queued: 0, running: 3, done: 0, failed: 0, abandoned: 0 };
+
+  it('counts a blocked agent apart from a stalled one', () => {
+    const c = liveCounts(counts, tasks, i, true);
+    expect(c.blocked).toBe(1);
+    expect(c.needsReview).toBe(1);
+    expect(c.running).toBe(1);
+  });
+
+  it('does not count a blocked agent as work in flight', () => {
+    const only = liveCounts({ ...counts, running: 1 }, [tasks[0]], i, true);
+    expect(only.running).toBe(0);
+    expect(only.blocked).toBe(1);
+    expect(only.needsReview).toBe(0);
+  });
+
+  it('reports nothing blocked before the pane list arrives', () => {
+    expect(liveCounts(counts, tasks, i, false).blocked).toBe(0);
+  });
+});
+
+describe('shouldPollPane', () => {
+  const base = {
+    hasSession: true,
+    ledgerRunning: true,
+    forceLive: false,
+    refPending: false,
+    paneReallyGone: false,
+  };
+
+  it('polls a running task that has a session', () => {
+    expect(shouldPollPane(base)).toBe(true);
+  });
+
+  // The second half of the bug was the poll being gated on the flag the 404 set,
+  // so one 404 stopped the only code that could clear it. `paneGone` is
+  // deliberately not an argument here, which is why nothing this function is
+  // given can express that case: it is tested against the real screen in
+  // test/task-detail.component.test.ts, where a bridge 404s and then answers.
+  //
+  // What is an argument is `paneReallyGone`, a 404 for a pane the list has
+  // dropped. Gating on that does not latch, because the pane list keeps arriving
+  // whether or not this screen reads anything.
+  it('stops polling once the pane list has dropped the pane', () => {
+    expect(shouldPollPane({ ...base, paneReallyGone: true })).toBe(false);
+  });
+
+  it('polls again as soon as the list holds the pane again', () => {
+    expect(shouldPollPane({ ...base, paneReallyGone: false })).toBe(true);
+  });
+
+  it('treats a missing paneReallyGone as not gone', () => {
+    const { paneReallyGone: _omitted, ...withoutFlag } = base;
+    expect(shouldPollPane(withoutFlag)).toBe(true);
+  });
+
+  it('waits while the ref cannot be turned into a bridge pane id', () => {
+    // Polling here asks the bridge for `box:wC:p1` and gets 404 for a session
+    // that is fine.
+    expect(shouldPollPane({ ...base, refPending: true })).toBe(false);
+  });
+
+  it('does not poll a task with no session at all', () => {
+    expect(shouldPollPane({ ...base, hasSession: false })).toBe(false);
+  });
+
+  it('does not poll a task the ledger has closed out', () => {
+    expect(shouldPollPane({ ...base, ledgerRunning: false })).toBe(false);
+  });
+
+  it('polls a closed-out task whose live view the user opened anyway', () => {
+    expect(shouldPollPane({ ...base, ledgerRunning: false, forceLive: true })).toBe(true);
+  });
+
+  // Nit 4, round 2. A read against a machine /machines marks unreachable can
+  // only come back 503; no pane on it is reachable until the machine is.
+  it('does not read a pane on a machine the bridge reports unreachable', () => {
+    expect(shouldPollPane({ ...base, machineListedDown: true })).toBe(false);
+  });
+
+  // The gate is /machines, which keeps arriving from App's poll. The read's own
+  // 503 is deliberately not part of it, or the gate would switch off the only
+  // call that could clear it.
+  it('reads again as soon as /machines stops reporting the machine down', () => {
+    expect(shouldPollPane({ ...base, machineListedDown: false })).toBe(true);
+  });
+
+  it('treats a missing machineListedDown as the machine being fine', () => {
+    const { paneReallyGone: _g, ...rest } = base;
+    expect(shouldPollPane(rest)).toBe(true);
   });
 });

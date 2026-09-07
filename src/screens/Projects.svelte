@@ -35,31 +35,42 @@
     { value: 'all', label: 'All' },
   ];
 
-  /** A project's running tasks split by what their panes actually report. */
+  /**
+   * A project's running tasks split by what their panes actually report.
+   *
+   * Blocked is its own figure. Counting it as running claimed work was in
+   * flight for an agent sitting at a prompt, and counting it as review used the
+   * phrase a stalled task earns for the one task that can still be answered.
+   */
   function liveCount(p: SummaryProject) {
     let running = 0;
+    let blocked = 0;
     let review = 0;
     for (const t of p.running_tasks ?? []) {
-      if (isSettled(liveTaskStatus(t, app.paneIndex, app.panesKnown, app.machineNames))) review += 1;
+      const s = liveTaskStatus(t, app.paneIndex, app.panesKnown, app.machineNames);
+      if (s === 'blocked') blocked += 1;
+      else if (isSettled(s)) review += 1;
       else running += 1;
     }
-    return { running, review };
+    return { running, blocked, review };
   }
 
   /** Fleet totals counted from the panes, not from the ledger's running_tasks. */
   const totals = $derived.by(() => {
     let running = 0;
+    let blocked = 0;
     let review = 0;
     for (const p of summary?.projects ?? []) {
       const c = liveCount(p);
       running += c.running;
+      blocked += c.blocked;
       review += c.review;
     }
     // Tasks the summary counts as running but does not list are still counted;
     // the ledger's total is the floor, and only what we can see gets moved.
     const listed = (summary?.projects ?? []).reduce((n, p) => n + (p.running_tasks?.length ?? 0), 0);
     const unseen = Math.max(0, (summary?.running_tasks ?? 0) - listed);
-    return { running: running + unseen, review };
+    return { running: running + unseen, blocked, review };
   });
 
   /** Filter is applied client-side so switching it never spins (section 5.1). */
@@ -152,6 +163,7 @@
   {#snippet subtitle()}
     <SummaryLine
       running={totals.running}
+      blocked={totals.blocked}
       needsReview={totals.review}
       queued={summary?.queued_tasks ?? 0}
       projects={shown.length}

@@ -5,6 +5,7 @@
     running,
     queued,
     projects,
+    blocked = 0,
     needsReview = 0,
     refreshing = false,
     loading = false,
@@ -12,6 +13,9 @@
     running: number;
     queued: number;
     projects: number;
+    /** Agents waiting on an answer. First on the line and in the alert colour:
+     *  it is the only figure here that names something Casper can act on. */
+    blocked?: number;
     /** Ledger-running tasks whose agent has stopped. Counted separately so the
      *  running figure is only ever work actually in flight. */
     needsReview?: number;
@@ -26,6 +30,10 @@
   {#if loading}
     Loading fleet
   {:else}
+    {#if blocked > 0}
+      <span class="blocked">{blocked} needs you</span>
+      <span class="sep s1"> · </span>
+    {/if}
     <span>{runText}</span>
     {#if needsReview > 0}
       <span class="sep s1"> · </span>
@@ -44,6 +52,9 @@
   }
   .review {
     color: var(--c-done);
+  }
+  .blocked {
+    color: var(--c-alert);
   }
   .refreshing .sep {
     animation: sep-step 600ms var(--ease-in-out) infinite;

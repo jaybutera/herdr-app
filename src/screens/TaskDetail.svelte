@@ -21,8 +21,8 @@
   import { app } from '../lib/store.svelte';
   import { ApiError, bridge, projtrack } from '../lib/api';
   import { parsePane, type Block } from '../lib/pane-parse';
-  import { machineForRef, paneIdForRef } from '../lib/pane-id';
-  import { isSettled, liveTaskStatus } from '../lib/live';
+  import { isRefUnresolved, isRemote, machineForRef, paneIdForRef } from '../lib/pane-id';
+  import { isSettled, liveTaskStatus, paneIsGone, shouldPollPane } from '../lib/live';
   import { clockTime, dayKey, dayLabel, relativeTime, statusSpec } from '../lib/format';
   import type { AgentStatus, TaskDetail } from '../lib/types';
   import { onMount, tick } from 'svelte';
@@ -43,6 +43,8 @@
   let paneLabel = $state<string | undefined>(undefined);
   let paneGone = $state(false);
   let paneError = $state<string | null>(null);
+  /** Set when the bridge answered but could not reach the machine the pane is on. */
+  let machineUnreachable = $state(false);
   let paneFailures = 0;
   let firstRead = $state(true);
   let view = $state<'messages' | 'terminal'>('messages');
@@ -69,6 +71,35 @@
   const bridgePaneId = $derived(paneIdForRef(task?.session_ref, app.machineNames));
   /** Which machine this session is on, shown when it is not this laptop. */
   const sessionMachine = $derived(machineForRef(task?.session_ref, app.machineNames));
+  /**
+   * True while a `<machine>:<id>` ref has no machine list to resolve against.
+   *
+   * Reading the pane in this window asks the bridge for `box:wC:p1`, an id it
+   * has never issued, and gets HTTP 404 back for a session that is working.
+   * Nothing calls the bridge until the list lands.
+   */
+  const refPending = $derived(isRefUnresolved(task?.session_ref, app.machineNames));
+
+  /**
+   * True when the machine this session is on is known to be down.
+   *
+   * Two sources, and they are split because only one of them can gate a poll.
+   * `machineListedDown` is the bridge's own /machines list, which keeps arriving
+   * from App's poll whether or not this screen reads anything, so the gate
+   * clears itself the moment the machine answers again. `machineUnreachable` is
+   * the 503 a read against a down machine returns; gating on that would switch
+   * off the only call that could clear it. The banner reads both, the poll gate
+   * reads the list alone.
+   *
+   * Only for a session on another machine. `sessionMachine` is `local` both for
+   * a genuinely local pane and for a remote ref the machine list has not
+   * resolved yet, so naming it here would put "Can't reach local" on a laptop
+   * session, and would do it in exactly the window where nothing is known.
+   */
+  const machineListedDown = $derived(
+    isRemote(sessionMachine) && app.machines.some((m) => m.name === sessionMachine && !m.reachable)
+  );
+  const machineDown = $derived(isRemote(sessionMachine) && (machineUnreachable || machineListedDown));
 
   /** The ledger crossed with the pane list, for the header and the banner. */
   const live = $derived(task ? liveTaskStatus(task, app.paneIndex, app.panesKnown, app.machineNames) : 'queued');
@@ -77,13 +108,79 @@
   // the transcript is the most useful thing on screen, and the composer is how
   // Casper answers. What changes is that the header stops calling it Running and
   // a banner says what actually happened.
-  const isLive = $derived(
-    !!task && !!task.session_ref && (task.status === 'running' || forceLive) && !paneGone
+  /**
+   * Whether the pane list holds this pane. `undefined` until the list arrives.
+   *
+   * This, and not the agent's state, is what says a pane exists. A pane the list
+   * holds is there whether its agent is working, blocked, idle or done; asking
+   * about the agent instead conflated "the list has dropped it" with "the list
+   * has it and it is not busy", and the second is most of the fleet.
+   */
+  const paneListed = $derived(
+    !app.panesKnown || refPending || !bridgePaneId ? undefined : app.paneIndex.has(bridgePaneId)
   );
 
-  /** The pane read is the freshest signal; fall back to the polled pane list. */
+  /**
+   * A 404 from the pane read, believed only when the pane list has dropped the
+   * pane too.
+   *
+   * The list is the same signal every other screen judges this task by, and it
+   * addresses the pane by the id the bridge itself issued. While it still holds
+   * the pane, a 404 from the read is a failed read: the bridge answers 404 for
+   * anything that is not a missing socket, its own 15 s exec timeout included.
+   * Letting one win is what put "Pane gone" on a session that was running on
+   * box, and then on every listed-but-idle pane whose read timed out once.
+   */
+  const paneReallyGone = $derived(paneIsGone(paneGone, paneListed));
+
+  const isLive = $derived(
+    !!task && !!task.session_ref && (task.status === 'running' || forceLive) && !paneReallyGone
+  );
+
+  /**
+   * Whether the pane poll should run.
+   *
+   * Deliberately not gated on `paneGone`: that flag is set by the 404 itself, so
+   * gating the timer on it made a single 404 permanent. The only code that
+   * clears `paneGone` is the read the gate had just switched off, so a pane that
+   * comes back, or a 404 that was only ever the unresolved-ref race, had no way
+   * to correct itself short of leaving the screen.
+   *
+   * `paneReallyGone` does gate it, and does not have that problem: it needs the
+   * pane list to agree, and the list keeps arriving from App's poll regardless
+   * of what this screen reads. Without it a ledger-running task whose pane is
+   * genuinely gone fired a read every pane interval, as low as one second, for
+   * as long as the screen stayed open, each one a `herdr pane read` exec on the
+   * bridge answering the same 404.
+   */
+  const shouldPoll = $derived(
+    shouldPollPane({
+      hasSession: !!task && !!task.session_ref,
+      ledgerRunning: task?.status === 'running',
+      forceLive,
+      refPending,
+      paneReallyGone,
+      machineListedDown,
+    })
+  );
+
+  /**
+   * The pane read is the freshest signal; fall back to the polled pane list.
+   *
+   * While the ref is unresolved nothing has been read and the pane list cannot
+   * be looked up either, so the only thing left is the ledger. Rendering that as
+   * "Working" states a fact about the agent that nothing has checked, next to a
+   * body that honestly says "Reading pane…". `pending` says that instead, and is
+   * not `unknown`, whose label "No agent" would be a different false claim.
+   */
   const headerStatus = $derived(
-    paneGone ? 'gone' : paneStatus !== 'unknown' ? paneStatus : liveToPane(live)
+    paneReallyGone
+      ? 'gone'
+      : paneStatus !== 'unknown'
+        ? paneStatus
+        : refPending
+          ? 'pending'
+          : liveToPane(live)
   );
 
   /** Map a live task status onto the pane vocabulary the header line speaks. */
@@ -125,6 +222,9 @@
   async function readPane() {
     const paneId = bridgePaneId;
     if (!paneId) return;
+    // The machine list has not arrived, so `paneId` is not yet the id the
+    // bridge knows. Asking anyway returns 404 for a live session.
+    if (refPending) return;
     try {
       const r = await bridge.read(app.settings, paneId);
       // Re-render only when the text actually changed (section 5.3a).
@@ -136,14 +236,30 @@
       paneStatus = r.agent_status;
       paneGone = false;
       paneError = null;
+      machineUnreachable = false;
       paneFailures = 0;
       app.noteSuccess();
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
         paneGone = true;
         paneError = null;
+        machineUnreachable = false;
         return;
       }
+      // 503 is the bridge saying it is fine and the machine is not: it answered
+      // the request in order to tell us so. Counting it as a bridge failure put
+      // "Can't reach the pane bridge" on screen and, through app.failures,
+      // tripped the OfflineStrip within two pane polls while projtrack and the
+      // bridge were both answering normally. The machine is what is down, and
+      // that is what the banner now says.
+      if (e instanceof ApiError && e.status === 503) {
+        machineUnreachable = true;
+        paneError = null;
+        paneFailures = 0;
+        app.noteSuccess();
+        return;
+      }
+      machineUnreachable = false;
       paneFailures += 1;
       // Three failures in a row raise the banner; the last transcript stays on
       // screen either way, and is never cleared (section 9).
@@ -157,6 +273,9 @@
   /** A finished task whose pane is still alive gets an "Open session" button. */
   async function checkSession() {
     if (!task?.session_ref || task.status === 'running') return;
+    // Same unresolved-ref race as readPane: a 404 here would report a live
+    // session on another machine as dead.
+    if (refPending) return;
     try {
       const p = await bridge.pane(app.settings, bridgePaneId);
       sessionAlive = true;
@@ -182,6 +301,9 @@
   async function sendText(text: string) {
     const paneId = bridgePaneId;
     if (!paneId) return;
+    // Same unresolved-ref window readPane waits out: `box:wC:p1` is not an
+    // id the bridge has, so the send would 404 and toast at Casper.
+    if (refPending) return;
     pending = [...pending, { text, at: Date.now() }];
     try {
       await bridge.send(app.settings, paneId, text);
@@ -196,6 +318,9 @@
   async function sendKey(key: string) {
     const paneId = bridgePaneId;
     if (!paneId) return;
+    // Same unresolved-ref window readPane waits out: `box:wC:p1` is not an
+    // id the bridge has, so the send would 404 and toast at Casper.
+    if (refPending) return;
     try {
       await bridge.keys(app.settings, paneId, [key]);
       app.showToast('Sent');
@@ -208,6 +333,9 @@
   async function sendDigit(digit: string) {
     const paneId = bridgePaneId;
     if (!paneId) return;
+    // Same unresolved-ref window readPane waits out: `box:wC:p1` is not an
+    // id the bridge has, so the send would 404 and toast at Casper.
+    if (refPending) return;
     try {
       await bridge.text(app.settings, paneId, digit);
       setTimeout(() => void readPane(), 250);
@@ -241,8 +369,9 @@
       void checkSession();
       if (task?.status === 'running' && task.session_ref) void readPane();
     });
+
     const paneTimer = setInterval(() => {
-      if (app.visible && isLive) void readPane();
+      if (app.visible && shouldPoll) void readPane();
     }, app.intervals.pane);
     const taskTimer = setInterval(() => {
       if (app.visible) void loadTask();
@@ -256,14 +385,47 @@
   let wasVisible = true;
   $effect(() => {
     const now = app.visible;
-    if (now && !wasVisible && isLive) void readPane();
+    if (now && !wasVisible && shouldPoll) void readPane();
     wasVisible = now;
+  });
+
+  // The first read of a remote session usually cannot happen on mount: the
+  // machine list comes from App's own poll and may land after this screen does.
+  // Reading on the edge where the ref becomes resolvable shows a box task's
+  // transcript as soon as the list arrives, rather than a pane interval later.
+  // It also clears a `paneGone` left over from a read that raced the list.
+  let wasPending = false;
+  $effect(() => {
+    const pending = refPending;
+    if (wasPending && !pending) {
+      paneGone = false;
+      if (shouldPoll) void readPane();
+      else void checkSession();
+    }
+    wasPending = pending;
   });
 
   // Opening the live view of a still-alive finished session starts its poll.
   $effect(() => {
     if (forceLive && !paneText) void readPane();
   });
+
+  /**
+   * What the history line calls this task, and which vocabulary says it.
+   *
+   * Normally the ledger's own word in the task vocabulary. With the pane gone
+   * that word is still "running", which put "Running · 14 min ago" directly
+   * above a banner reading "Pane gone": the header and the banner describing
+   * one task two ways. The live vocabulary has the honest word for it,
+   * `orphan`, "Session gone" - the ledger says running and there is no such
+   * pane. Saying `abandoned` instead would invent a ledger state projtrack has
+   * not written.
+   */
+  const histStatus = $derived<{ domain: 'task' | 'live'; value: string }>(
+    paneReallyGone && task?.status === 'running'
+      ? { domain: 'live', value: 'orphan' }
+      : { domain: 'task', value: task?.status ?? 'queued' }
+  );
 
   /** History events grouped with a divider whenever the day changes. */
   const events = $derived(task?.events ?? []);
@@ -280,10 +442,13 @@
           label={paneLabel}
         />
       {:else}
+        <!-- `histStatus` rather than `task.status`: with the pane gone the
+             ledger still says running, and printing that put "Running" directly
+             above a banner reading "Pane gone". -->
         <div class="hist-status">
-          <StatusDot domain="task" value={task.status} size={9} />
+          <StatusDot domain={histStatus.domain} value={histStatus.value} size={9} />
           <span class="t-meta">
-            {statusSpec('task', task.status).label} · {relativeTime(task.updated_at)}
+            {statusSpec(histStatus.domain, histStatus.value).label} · {relativeTime(task.updated_at)}
           </span>
         </div>
       {/if}
@@ -291,7 +456,16 @@
   {/snippet}
 </Header>
 
-{#if paneGone}
+{#if machineDown}
+  <!-- The bridge answered; it just cannot reach the machine. Saying "can't
+       reach the pane bridge" here sent Casper to check a service that was up. -->
+  <div class="pad">
+    <ErrorBanner
+      text="Can't reach {sessionMachine}. The pane bridge is up."
+      onRetry={() => void readPane()}
+    />
+  </div>
+{:else if paneReallyGone}
   <div class="pad"><ErrorBanner text="Pane gone" /></div>
 {:else if staleNote}
   <div class="pad"><p class="t-meta stale">{staleNote}</p></div>
@@ -349,14 +523,14 @@
     {/if}
     <Composer
       placeholder="Message this session…"
-      disabled={paneGone}
+      disabled={paneReallyGone || refPending}
       onSend={sendText}
       onFocusChange={onComposerFocus}
     />
     <QuickKeys
       onKey={sendKey}
       onText={sendDigit}
-      disabled={paneGone}
+      disabled={paneReallyGone || refPending}
       alertDigits={paneStatus === 'blocked'}
     />
   </div>
