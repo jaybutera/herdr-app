@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { countsLine, relativeTime, statusSpec, stripLeadingEmoji } from '../src/lib/format';
+import {
+  countsLine,
+  liveCountsLine,
+  relativeTime,
+  statusSpec,
+  stripLeadingEmoji,
+} from '../src/lib/format';
 
 const NOW = Date.parse('2026-09-06T18:00:00Z');
 
@@ -69,5 +75,35 @@ describe('stripLeadingEmoji', () => {
   });
   it('leaves ordinary text alone', () => {
     expect(stripLeadingEmoji('the build is green')).toBe('the build is green');
+  });
+});
+
+// Nit 1, round 2. The blocked row on the card reads "Needs you"; the counts line
+// above it read "1 needs review", which is what a stalled task earns.
+describe('liveCountsLine', () => {
+  const base = { queued: 0, running: 0, done: 0, failed: 0, abandoned: 0, needsReview: 0 };
+
+  it('says "needs you" for a blocked agent, not "needs review"', () => {
+    const line = liveCountsLine({ ...base, blocked: 1 });
+    expect(line).toBe('1 needs you');
+    expect(line).not.toContain('review');
+  });
+
+  it('puts the blocked figure first, ahead of work in flight', () => {
+    expect(liveCountsLine({ ...base, running: 2, blocked: 1 })).toBe('1 needs you · 2 running');
+  });
+
+  it('keeps blocked and needs-review as separate figures', () => {
+    expect(liveCountsLine({ ...base, running: 1, blocked: 1, needsReview: 2 })).toBe(
+      '1 needs you · 1 running · 2 need review'
+    );
+  });
+
+  it('leaves the line alone when nothing is blocked', () => {
+    expect(liveCountsLine({ ...base, running: 1, needsReview: 2 })).toBe('1 running · 2 need review');
+  });
+
+  it('still reads a card with no tasks at all', () => {
+    expect(liveCountsLine({ ...base, blocked: 0 })).toBe('No tasks yet');
   });
 });

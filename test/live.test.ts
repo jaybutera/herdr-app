@@ -170,6 +170,37 @@ describe('paneIsGone', () => {
   });
 });
 
+// Nit 1, round 2. The card's blocked row says "Needs you" and the counts line
+// above it said "1 needs review", the phrase a stalled task earns. One task,
+// two descriptions.
+describe('liveCounts and a blocked agent', () => {
+  const i = idx(['w1:p1', 'blocked'], ['w2:p1', 'idle'], ['w3:p1', 'working']);
+  const tasks = [
+    task({ id: 1, session_ref: 'w1:p1' }),
+    task({ id: 2, session_ref: 'w2:p1' }),
+    task({ id: 3, session_ref: 'w3:p1' }),
+  ];
+  const counts = { queued: 0, running: 3, done: 0, failed: 0, abandoned: 0 };
+
+  it('counts a blocked agent apart from a stalled one', () => {
+    const c = liveCounts(counts, tasks, i, true);
+    expect(c.blocked).toBe(1);
+    expect(c.needsReview).toBe(1);
+    expect(c.running).toBe(1);
+  });
+
+  it('does not count a blocked agent as work in flight', () => {
+    const only = liveCounts({ ...counts, running: 1 }, [tasks[0]], i, true);
+    expect(only.running).toBe(0);
+    expect(only.blocked).toBe(1);
+    expect(only.needsReview).toBe(0);
+  });
+
+  it('reports nothing blocked before the pane list arrives', () => {
+    expect(liveCounts(counts, tasks, i, false).blocked).toBe(0);
+  });
+});
+
 describe('shouldPollPane', () => {
   const base = {
     hasSession: true,
@@ -221,5 +252,23 @@ describe('shouldPollPane', () => {
 
   it('polls a closed-out task whose live view the user opened anyway', () => {
     expect(shouldPollPane({ ...base, ledgerRunning: false, forceLive: true })).toBe(true);
+  });
+
+  // Nit 4, round 2. A read against a machine /machines marks unreachable can
+  // only come back 503; no pane on it is reachable until the machine is.
+  it('does not read a pane on a machine the bridge reports unreachable', () => {
+    expect(shouldPollPane({ ...base, machineListedDown: true })).toBe(false);
+  });
+
+  // The gate is /machines, which keeps arriving from App's poll. The read's own
+  // 503 is deliberately not part of it, or the gate would switch off the only
+  // call that could clear it.
+  it('reads again as soon as /machines stops reporting the machine down', () => {
+    expect(shouldPollPane({ ...base, machineListedDown: false })).toBe(true);
+  });
+
+  it('treats a missing machineListedDown as the machine being fine', () => {
+    const { paneReallyGone: _g, ...rest } = base;
+    expect(shouldPollPane(rest)).toBe(true);
   });
 });

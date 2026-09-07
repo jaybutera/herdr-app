@@ -294,6 +294,36 @@ describe('a task whose agent is waiting on an answer', () => {
     expect(screen.queryByRole('button', { expanded: false })).toBeNull();
   });
 
+  // Nit 3, round 2. Red over green rested on nothing but source order: both
+  // selectors are `.card.<class>`, same specificity, so reordering the style
+  // block would have quietly turned this edge green. The rule now excludes
+  // .blocked from the running edge, which is what these classes pin.
+  it('carries the blocked edge, not the running one, when it has both', () => {
+    const working = task({ id: 53, title: 'still working', session_ref: 'wA8:p1' });
+    setFleet(
+      [pane('w9K:p1', 'local', 'blocked'), pane('wA8:p1', 'local', 'working')],
+      [{ name: 'local', reachable: true }]
+    );
+    const { container } = draw(project({ running_tasks: [t, working] }));
+
+    const card = container.querySelector('.card')!;
+    expect(card.classList.contains('blocked')).toBe(true);
+    expect(card.classList.contains('running')).toBe(true);
+    // The selector the running edge is written with, which .blocked must beat.
+    expect(card.matches('.card.running:not(.blocked)')).toBe(false);
+    expect(card.matches('.card.blocked')).toBe(true);
+  });
+
+  it('carries the running edge on a card with nothing blocked', () => {
+    const working = task({ id: 53, title: 'still working', session_ref: 'wA8:p1' });
+    setFleet([pane('wA8:p1', 'local', 'working')], [{ name: 'local', reachable: true }]);
+    const { container } = draw(project({ running_tasks: [working] }));
+
+    const card = container.querySelector('.card')!;
+    expect(card.matches('.card.running:not(.blocked)')).toBe(true);
+    expect(card.matches('.card.blocked')).toBe(false);
+  });
+
   it('leaves the settled tasks behind the expander where they were', () => {
     const stopped = task({ id: 54, title: 'stopped task', session_ref: 'wA8:p1' });
     setFleet(

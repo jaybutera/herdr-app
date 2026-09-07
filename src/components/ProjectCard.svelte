@@ -231,8 +231,12 @@
     transition-duration: var(--d-fast);
   }
   /* A project with a working agent carries a live edge, so the running ones
-     read as a group before any row is read individually. */
-  .card.running {
+     read as a group before any row is read individually. Excluding .blocked
+     rather than leaning on source order: both selectors have the same
+     specificity, so which one won was decided by which came second in the file,
+     and reordering the block would have silently turned the edge green on a card
+     with an agent waiting for an answer. */
+  .card.running:not(.blocked) {
     border-left: 2px solid var(--c-live);
   }
   /* A blocked agent is waiting on an answer, which outranks work in flight:

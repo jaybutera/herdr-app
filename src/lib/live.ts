@@ -103,7 +103,14 @@ export function countLive(
 
 /**
  * The task counts a project card shows, with the ledger's `running` bucket
- * split into what is still running and what has quietly stopped.
+ * split into what is still running, what is waiting on Casper, and what has
+ * quietly stopped.
+ *
+ * Blocked gets its own figure rather than joining `needsReview`. A blocked agent
+ * is stopped at a question and a stalled one is stopped for good; the card's
+ * rows have said so since blocked rows got the alert glyph and the label "Needs
+ * you", and a counts line reading "1 needs review" directly above a row reading
+ * "Needs you" described the same task two ways.
  */
 export function liveCounts(
   counts: TaskCounts | undefined,
@@ -111,7 +118,7 @@ export function liveCounts(
   panes: PaneIndex,
   panesKnown: boolean,
   machines: readonly string[] = []
-): TaskCounts & { needsReview: number } {
+): TaskCounts & { blocked: number; needsReview: number } {
   const base: TaskCounts = {
     queued: counts?.queued ?? 0,
     running: counts?.running ?? 0,
@@ -119,19 +126,21 @@ export function liveCounts(
     failed: counts?.failed ?? 0,
     abandoned: counts?.abandoned ?? 0,
   };
-  if (!panesKnown) return { ...base, needsReview: 0 };
+  if (!panesKnown) return { ...base, blocked: 0, needsReview: 0 };
 
   // Only the tasks we can actually see the panes for can be reclassified; a
   // project whose running list is truncated keeps the rest in `running`.
   let stillRunning = 0;
+  let blocked = 0;
   let needsReview = 0;
   for (const t of runningTasks) {
     const s = liveTaskStatus(t, panes, panesKnown, machines);
     if (s === 'running') stillRunning += 1;
+    else if (s === 'blocked') blocked += 1;
     else needsReview += 1;
   }
   const unseen = Math.max(0, base.running - runningTasks.length);
-  return { ...base, running: stillRunning + unseen, needsReview };
+  return { ...base, running: stillRunning + unseen, blocked, needsReview };
 }
 
 /**
@@ -181,6 +190,14 @@ export function paneIsGone(paneGone: boolean, listed: boolean | undefined): bool
  * task whose pane is genuinely gone stops firing a read every pane interval.
  * Each of those reads costs the bridge a `herdr pane read` exec, over the ssh
  * forward for a remote machine, to be told the same 404 again.
+ *
+ * `machineListedDown` is the same shape of argument and gates for the same
+ * reason: a read against a machine /machines marks unreachable can only come
+ * back 503, and no pane on that machine can be reached until the machine is. It
+ * is deliberately the /machines flag alone, never the 503 the read itself
+ * returns. That flag would be another latch set by the very call the gate
+ * switches off; /machines keeps arriving from App's poll, so the moment the
+ * machine answers again the poll resumes on its own.
  */
 export function shouldPollPane(opts: {
   hasSession: boolean;
@@ -188,11 +205,13 @@ export function shouldPollPane(opts: {
   forceLive: boolean;
   refPending: boolean;
   paneReallyGone?: boolean;
+  machineListedDown?: boolean;
 }): boolean {
   return (
     opts.hasSession &&
     (opts.ledgerRunning || opts.forceLive) &&
     !opts.refPending &&
-    !opts.paneReallyGone
+    !opts.paneReallyGone &&
+    !opts.machineListedDown
   );
 }

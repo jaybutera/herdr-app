@@ -83,20 +83,23 @@
   /**
    * True when the machine this session is on is known to be down.
    *
-   * Two sources: the bridge's own /machines list marks a machine unreachable,
-   * and a pane read against a down machine answers 503. Either is enough, and
-   * neither says anything is wrong with the bridge itself.
+   * Two sources, and they are split because only one of them can gate a poll.
+   * `machineListedDown` is the bridge's own /machines list, which keeps arriving
+   * from App's poll whether or not this screen reads anything, so the gate
+   * clears itself the moment the machine answers again. `machineUnreachable` is
+   * the 503 a read against a down machine returns; gating on that would switch
+   * off the only call that could clear it. The banner reads both, the poll gate
+   * reads the list alone.
    *
    * Only for a session on another machine. `sessionMachine` is `local` both for
    * a genuinely local pane and for a remote ref the machine list has not
    * resolved yet, so naming it here would put "Can't reach local" on a laptop
    * session, and would do it in exactly the window where nothing is known.
    */
-  const machineDown = $derived(
-    isRemote(sessionMachine) &&
-      (machineUnreachable ||
-        app.machines.some((m) => m.name === sessionMachine && !m.reachable))
+  const machineListedDown = $derived(
+    isRemote(sessionMachine) && app.machines.some((m) => m.name === sessionMachine && !m.reachable)
   );
+  const machineDown = $derived(isRemote(sessionMachine) && (machineUnreachable || machineListedDown));
 
   /** The ledger crossed with the pane list, for the header and the banner. */
   const live = $derived(task ? liveTaskStatus(task, app.paneIndex, app.panesKnown, app.machineNames) : 'queued');
@@ -157,6 +160,7 @@
       forceLive,
       refPending,
       paneReallyGone,
+      machineListedDown,
     })
   );
 
@@ -406,6 +410,23 @@
     if (forceLive && !paneText) void readPane();
   });
 
+  /**
+   * What the history line calls this task, and which vocabulary says it.
+   *
+   * Normally the ledger's own word in the task vocabulary. With the pane gone
+   * that word is still "running", which put "Running · 14 min ago" directly
+   * above a banner reading "Pane gone": the header and the banner describing
+   * one task two ways. The live vocabulary has the honest word for it,
+   * `orphan`, "Session gone" - the ledger says running and there is no such
+   * pane. Saying `abandoned` instead would invent a ledger state projtrack has
+   * not written.
+   */
+  const histStatus = $derived<{ domain: 'task' | 'live'; value: string }>(
+    paneReallyGone && task?.status === 'running'
+      ? { domain: 'live', value: 'orphan' }
+      : { domain: 'task', value: task?.status ?? 'queued' }
+  );
+
   /** History events grouped with a divider whenever the day changes. */
   const events = $derived(task?.events ?? []);
 </script>
@@ -421,10 +442,13 @@
           label={paneLabel}
         />
       {:else}
+        <!-- `histStatus` rather than `task.status`: with the pane gone the
+             ledger still says running, and printing that put "Running" directly
+             above a banner reading "Pane gone". -->
         <div class="hist-status">
-          <StatusDot domain="task" value={task.status} size={9} />
+          <StatusDot domain={histStatus.domain} value={histStatus.value} size={9} />
           <span class="t-meta">
-            {statusSpec('task', task.status).label} · {relativeTime(task.updated_at)}
+            {statusSpec(histStatus.domain, histStatus.value).label} · {relativeTime(task.updated_at)}
           </span>
         </div>
       {/if}

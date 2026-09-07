@@ -582,3 +582,106 @@ describe('the header while the ref is pending', () => {
     expect(screen.getByText('Working')).toBeTruthy();
   });
 });
+
+// Nit 2, round 2. With the pane gone the screen drops to history mode, which
+// printed the ledger's own word. "Running · 14 min ago" sat directly above a
+// banner reading "Pane gone": the header and the banner disagreed about the
+// same task, on the same screen, at the same time.
+describe('the header under "Pane gone"', () => {
+  beforeEach(() => {
+    task.mockResolvedValue({ ...TASK_103, session_ref: 'box:wZZ:p1' });
+    app.setPanes([BOX_PANE]); // wZZ:p1 is not in it
+    app.setMachines(MACHINES);
+    app.panesKnown = true;
+    reads.mockImplementation(async () => {
+      throw new ApiError('HTTP 404', 404);
+    });
+  });
+
+  it('does not call the task running above a banner saying the pane is gone', async () => {
+    draw();
+    await flush();
+
+    expect(screen.getByText('Pane gone')).toBeTruthy();
+    expect(screen.queryByText(/Running · /)).toBeNull();
+  });
+
+  it('says the session is gone, the one thing that is true of both', async () => {
+    // Not "Abandoned": projtrack has written no such thing, and the header must
+    // not invent a ledger state to avoid contradicting the banner.
+    draw();
+    await flush();
+
+    expect(screen.getByText(/Session gone · /)).toBeTruthy();
+    expect(screen.queryByText(/Abandoned · /)).toBeNull();
+  });
+
+  it('still says when the task was last touched', async () => {
+    draw();
+    await flush();
+
+    expect(screen.getByText(/ago|just now/)).toBeTruthy();
+  });
+
+  it('leaves the header alone for a task the ledger really did close out', async () => {
+    task.mockResolvedValue({ ...TASK_103, status: 'done', session_ref: 'box:wZZ:p1' });
+    panes.mockRejectedValue(new ApiError('HTTP 404', 404));
+
+    draw();
+    await flush();
+
+    expect(screen.getByText(/Done · /)).toBeTruthy();
+  });
+});
+
+// Nit 4, round 2. /machines marks the machine unreachable, so every read
+// against a pane on it can only come back 503. The gate is that list, which
+// keeps arriving from App's poll, and not the 503 the read itself returns.
+describe('a session on a machine /machines reports down', () => {
+  beforeEach(() => {
+    app.setPanes([BOX_PANE]);
+    app.setMachines([
+      { name: 'local', reachable: true },
+      { name: 'box', reachable: false },
+    ]);
+    app.panesKnown = true;
+    reads.mockImplementation(async () => {
+      throw new ApiError('HTTP 503', 503);
+    });
+  });
+
+  it('does not read a pane on it every pane interval', async () => {
+    draw();
+    await flush();
+    const after = reads.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flush();
+
+    expect(reads.mock.calls.length).toBe(after);
+  });
+
+  it('still names the machine rather than blaming the bridge', async () => {
+    draw();
+    await flush();
+
+    expect(screen.getByText(/Can't reach box/)).toBeTruthy();
+    expect(screen.queryByText(/Can't reach the pane bridge/)).toBeNull();
+  });
+
+  it('reads again once /machines says the machine is back', async () => {
+    draw();
+    await flush();
+    const stopped = reads.mock.calls.length;
+
+    // The screen is told by App's poll, without ever reading the pane itself.
+    bridgeAnsweringOnlyFor('box/wC:p1');
+    app.setMachines(MACHINES);
+    await flush();
+    await vi.advanceTimersByTimeAsync(6000);
+    await flush();
+
+    expect(reads.mock.calls.length).toBeGreaterThan(stopped);
+    expect(screen.queryByText(/Can't reach box/)).toBeNull();
+  });
+});
