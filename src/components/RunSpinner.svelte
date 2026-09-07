@@ -8,15 +8,34 @@
   // reason as every other glyph in section 4: it tints from a CSS variable and
   // never needs an icon font.
 
-  let { size = 11, title = 'Working' }: { size?: number; title?: string } = $props();
+  let {
+    size = 11,
+    title = 'Working',
+    /**
+     * False when the arc should be drawn but held still.
+     *
+     * Motion is the claim: it says an agent is working right now. With no pane
+     * list the only source is the ledger, which goes stale silently, so the task
+     * keeps its row and the arc stops turning rather than asserting liveness
+     * nothing has checked.
+     */
+    spin = true,
+  }: { size?: number; title?: string; spin?: boolean } = $props();
 
   const r = $derived(size / 2);
-  // Three quarters of the circle: enough gap that the rotation reads as motion.
   const arc = $derived(2 * Math.PI * (r - 1.1));
+  /** How much of the circle is drawn; the rest is the gap that reads as motion. */
+  const DRAWN = 0.72;
 </script>
 
 <span class="spin" style="--size: {size}px" role="img" aria-label={title}>
-  <svg width={size} height={size} viewBox="0 0 {size} {size}" aria-hidden="true">
+  <svg
+    class:still={!spin}
+    width={size}
+    height={size}
+    viewBox="0 0 {size} {size}"
+    aria-hidden="true"
+  >
     <circle
       cx={r}
       cy={r}
@@ -25,7 +44,7 @@
       stroke="var(--c-live)"
       stroke-width="1.6"
       stroke-linecap="round"
-      stroke-dasharray="{arc * 0.72} {arc}"
+      stroke-dasharray="{arc * DRAWN} {arc}"
     />
   </svg>
 </span>
@@ -41,6 +60,10 @@
     display: block;
     transform-origin: 50% 50%;
     animation: spin-arc 900ms linear infinite;
+  }
+  svg.still {
+    animation: none;
+    opacity: 0.65;
   }
   /* The ambient animations all stop with the tab hidden (section 9). */
   :global(body.hidden) svg {

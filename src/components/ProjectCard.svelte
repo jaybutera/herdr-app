@@ -23,6 +23,9 @@
   let longFired = false;
   /** Click-to-expand: the tasks that are not running are hidden until asked for. */
   let expanded = $state(false);
+  /** Ties the expander to the region it reveals; a card per project, so the id
+   *  has to be per project too. */
+  const restId = $derived(`project-${project.id}-rest`);
 
   function down() {
     longFired = false;
@@ -52,6 +55,18 @@
   }
 
   /**
+   * True when nothing has confirmed any of this, because no pane list has landed.
+   *
+   * The rows still show: with the bridge down, dropping every running task would
+   * be the same false claim the live layer exists to prevent. What is dropped is
+   * the assertion. A turning arc says an agent is mid-turn right now, and with
+   * the bridge unreachable that is the ledger talking; every one of the tasks it
+   * lists as running would turn, at whatever age. Still, unlabelled, they carry
+   * only what the ledger actually knows.
+   */
+  const unconfirmed = $derived(!app.panesKnown);
+
+  /**
    * Every task the summary lists for this project, each carrying its own live
    * status. The card splits them rather than slicing the ledger's running list:
    * "running" here means the pane says the agent is working, which is the only
@@ -66,8 +81,19 @@
 
   /** Shown on the collapsed card: only agents that are actually working. */
   const running = $derived(lines.filter((l) => l.live === 'running'));
+  /**
+   * Also shown on the collapsed card: agents that have stopped and are waiting
+   * on an answer.
+   *
+   * A blocked pane is the one state that cannot resolve itself. Hiding it behind
+   * the expander made the list quietest about the only task that needs Casper
+   * now; the counts line said "1 needs review", which is the same phrase a
+   * stalled task earns. It gets the alert glyph and its own label instead, so it
+   * is never read as a slower kind of running.
+   */
+  const blocked = $derived(lines.filter((l) => l.live === 'blocked'));
   /** Everything else, behind the expander. */
-  const rest = $derived(lines.filter((l) => l.live !== 'running'));
+  const rest = $derived(lines.filter((l) => l.live !== 'running' && l.live !== 'blocked'));
 
   const counts = $derived(
     liveCounts(
@@ -80,12 +106,16 @@
   );
 </script>
 
-<div class="wrap" class:selected>
+<div
+  class="wrap"
+  class:selected
+  class:dead={project.status === 'dead'}
+  class:dormant={project.status === 'dormant'}
+>
   <button
     class="card"
-    class:dead={project.status === 'dead'}
-    class:dormant={project.status === 'dormant'}
-    class:running={running.length > 0}
+    class:running={running.length > 0 && !unconfirmed}
+    class:blocked={blocked.length > 0}
     onclick={click}
     onpointerdown={down}
     onpointerup={up}
@@ -100,15 +130,41 @@
       {#if running.length > 0}
         <!-- The card-level mark: a project with work in flight is picked out of
              the list without reading its counts line. -->
-        <RunSpinner size={12} title="{running.length} running" />
+        <RunSpinner
+          size={12}
+          spin={!unconfirmed}
+          title={unconfirmed
+            ? `${running.length} listed as running`
+            : `${running.length} running`}
+        />
+      {/if}
+      {#if blocked.length > 0}
+        <!-- A second, louder mark. The arc turns for work in flight; this one
+             does not move, because nothing is moving until Casper answers. -->
+        <span data-testid="blocked-mark">
+          <StatusDot domain="live" value="blocked" size={12} />
+        </span>
       {/if}
     </span>
     <span class="t-meta counts">{liveCountsLine(counts)}</span>
 
-    <!-- Collapsed, a card lists only what is genuinely running. -->
+    <!-- Collapsed, a card lists what is running and what is waiting on an
+         answer. Everything else is behind the expander. -->
+    {#each blocked as l (l.task.id)}
+      <span class="run" data-testid="blocked-task">
+        <StatusDot domain="live" value="blocked" size={11} />
+        <span class="t-meta title">{l.task.title}</span>
+        <span class="t-meta flag alert">{statusSpec('live', 'blocked').label}</span>
+        {#if l.remote}<span class="t-meta machine mono">{l.machine}</span>{/if}
+      </span>
+    {/each}
     {#each running as l (l.task.id)}
       <span class="run" data-testid="running-task">
-        <RunSpinner size={11} />
+        <RunSpinner
+          size={11}
+          spin={!unconfirmed}
+          title={unconfirmed ? 'Listed as running' : 'Working'}
+        />
         <span class="t-meta title">{l.task.title}</span>
         {#if l.remote}<span class="t-meta machine mono">{l.machine}</span>{/if}
       </span>
@@ -119,6 +175,7 @@
     <button
       class="expander"
       aria-expanded={expanded}
+      aria-controls={expanded ? restId : undefined}
       onclick={() => (expanded = !expanded)}
     >
       <span class="chev" class:open={expanded}>▸</span>
@@ -129,7 +186,7 @@
   {/if}
 
   {#if expanded}
-    <div class="rest">
+    <div class="rest" id={restId}>
       {#each rest as l (l.task.id)}
         <span class="run other" data-testid="other-task">
           <StatusDot domain="live" value={l.live} size={8} />
@@ -178,6 +235,11 @@
   .card.running {
     border-left: 2px solid var(--c-live);
   }
+  /* A blocked agent is waiting on an answer, which outranks work in flight:
+     the edge is alert-red even on a card that also has something running. */
+  .card.blocked {
+    border-left: 2px solid var(--c-alert);
+  }
   .dormant {
     opacity: 0.8;
   }
@@ -219,6 +281,10 @@
   .flag {
     flex: none;
     color: var(--c-done);
+  }
+  /* "Needs you" is not a result, so it does not get the done colour. */
+  .flag.alert {
+    color: var(--c-alert);
   }
   .machine {
     flex: none;
