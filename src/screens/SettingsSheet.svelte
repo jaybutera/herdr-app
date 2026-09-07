@@ -32,7 +32,7 @@
   async function testProjtrack() {
     projtrackTest = null;
     try {
-      await projtrack.health({ ...app.settings, projtrackUrl });
+      await projtrack.health({ ...app.settings, projtrackUrl, token });
       projtrackTest = { ok: true, text: 'Reachable' };
     } catch (e) {
       projtrackTest = { ok: false, text: e instanceof Error ? e.message : 'Failed' };
