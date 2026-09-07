@@ -1,4 +1,4 @@
-# Herdr app
+# Orcha app
 
 A phone and laptop view into the local agent fleet. It shows projects and tasks
 from projtrack, watches what a running task's Claude session is saying, types
@@ -62,6 +62,16 @@ also means one host and one token to configure rather than two.
 The daemon side lives in `~/src/herdr-telegram-orchestrator`, which serves the
 pane bridge and the chat endpoint. Its README documents the routes; the app is
 built against the shapes in section 2 of `DESIGN.md`.
+
+## The app id is still `dev.herdr.app`
+
+The app was renamed from Herdr to Orcha in v0.1.3, but only the visible name
+changed. Android identifies an installed app by its `applicationId`, and the
+Tauri store that holds the bridge URL and the bearer token lives in a data
+directory derived from it. Changing it to `dev.orcha.app` would make the phone
+treat the next APK as a different app: the old one would stay installed and the
+new one would start with an empty Settings sheet. There is no Play listing whose
+id has to match the name, so the id stays and the upgrade keeps working.
 
 ## Three things worth knowing before changing the build
 

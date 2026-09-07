@@ -28,7 +28,19 @@
   let lastSentAt = $state(0);
 
   let scroller: HTMLDivElement | undefined = $state();
+  /** True while the view is pinned to the newest message. Set false only by a
+   *  real user scroll away from the bottom. */
   let atBottom = true;
+  /** Suppresses onScroll bookkeeping while we are the ones moving the scroller,
+   *  so a programmatic jump is never mistaken for the user scrolling up. */
+  let selfScrolling = false;
+  /** Hidden until the first pin lands, so the catch-up is never on screen. */
+  let ready = $state(false);
+  /** Shown when the user has scrolled up and new messages are below. */
+  let showJump = $state(false);
+  /** Highest id present at first paint. History mounts flat; only messages that
+   *  arrive after this animate in, so the scroller never grows under the pin. */
+  let historyMark = $state(0);
 
   const lastId = $derived(messages.length ? messages[messages.length - 1].id : 0);
   // TypingDots show while busy, or within 20s of sending, whichever is longer.
@@ -46,16 +58,17 @@
         chat.state(app.settings).catch(() => null),
       ]);
       messages = msgs.messages ?? [];
+      historyMark = messages.length ? messages[messages.length - 1].id : 0;
       if (st) chatState = st;
       error = null;
       app.noteSuccess();
-      await tick();
-      scrollToBottom();
+      await pinToBottom();
     } catch (e) {
       error = e instanceof Error ? e.message : 'Request failed';
       app.noteFailure();
     } finally {
       loading = false;
+      ready = true;
     }
   }
 
@@ -71,7 +84,8 @@
         // Anything the daemon accepted clears the matching local echo.
         queued = queued.filter((q) => !fresh.some((m) => m.role === 'user' && m.text === q.text));
         await tick();
-        if (atBottom) scrollToBottom(true);
+        if (atBottom) scrollToBottom();
+        else showJump = true;
       }
       if (st) chatState = st;
       error = null;
@@ -98,8 +112,10 @@
   async function sendMessage(text: string) {
     lastSentAt = Date.now();
     queued = [...queued, { text, at: Date.now() }];
+    atBottom = true;
+    showJump = false;
     await tick();
-    scrollToBottom(true);
+    scrollToBottom();
     try {
       await chat.post(app.settings, text);
       queued = queued.filter((q) => q.text !== text);
@@ -109,14 +125,63 @@
     }
   }
 
-  function scrollToBottom(smooth = false) {
+  /**
+   * Jump to the newest message. Always instant: `behavior: 'smooth'` here was
+   * what made a full history animate past the reader one poll at a time.
+   */
+  function scrollToBottom() {
     if (!scroller) return;
-    scroller.scrollTo({ top: scroller.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+    selfScrolling = true;
+    scroller.scrollTop = scroller.scrollHeight;
+    // Cleared after the scroll event this assignment queues has been dispatched.
+    requestAnimationFrame(() => {
+      selfScrolling = false;
+    });
+  }
+
+  /**
+   * Pin to the bottom once the scroller has stopped growing.
+   *
+   * `tick()` alone is not enough: it flushes Svelte's DOM update, not layout.
+   * At that point the freshly mounted bubbles are still running their `block-in`
+   * transform and the web fonts are still swapping in, so `scrollHeight` reads
+   * short and the jump lands somewhere back in history. We re-pin across a few
+   * frames and stop as soon as the height holds steady.
+   */
+  async function pinToBottom() {
+    await tick();
+    atBottom = true;
+    showJump = false;
+    scrollToBottom();
+    if (!scroller) return;
+    let last = scroller.scrollHeight;
+    for (let i = 0; i < 12; i++) {
+      await new Promise((r) => requestAnimationFrame(r));
+      if (!scroller) return;
+      scrollToBottom();
+      const h = scroller.scrollHeight;
+      if (h === last && i > 1) break;
+      last = h;
+    }
+    // Fonts land after their own swap; one last pin catches the reflow.
+    const fonts = (document as Document & { fonts?: { ready: Promise<unknown> } }).fonts;
+    if (fonts?.ready) {
+      try {
+        await fonts.ready;
+      } catch {
+        // Nothing to do; the frame loop above already pinned us.
+      }
+      if (atBottom) scrollToBottom();
+    }
   }
 
   function onScroll() {
-    if (!scroller) return;
-    atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 24;
+    if (!scroller || selfScrolling) return;
+    const gap = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+    atBottom = gap < 24;
+    // Matches TaskDetail: the pin releases only once the user is clearly up.
+    if (gap > 80) showJump = true;
+    else if (atBottom) showJump = false;
   }
 
   /** A divider whenever more than 10 minutes pass between messages. */
@@ -158,47 +223,62 @@
 </Header>
 
 <div class="col">
-  <div class="scroll" bind:this={scroller} onscroll={onScroll}>
-    {#if error}
-      <ErrorBanner
-        text="Can't reach the orchestrator{error ? ` — ${error}` : ''}"
-        onRetry={() => void loadInitial()}
-      />
-    {/if}
+  <div class="scrollwrap">
+    <div class="scroll" class:ready bind:this={scroller} onscroll={onScroll}>
+      {#if error}
+        <ErrorBanner
+          text="Can't reach the orchestrator{error ? ` — ${error}` : ''}"
+          onRetry={() => void loadInitial()}
+        />
+      {/if}
 
-    {#if loading && !messages.length}
-      <Skeleton shape="bubble" />
-      <Skeleton shape="bubble" />
-      <Skeleton shape="bubble" />
-    {:else if !messages.length && !queued.length}
-      <EmptyState text="Ask what the fleet is doing" />
-    {:else}
-      {#each messages as m, i (m.id)}
-        {#if needsDivider(i)}
-          <TimeDivider label={clockTime(m.ts)} />
-        {/if}
-        {#if m.role === 'event'}
-          <EventCard
-            kind={m.kind}
-            text={stripLeadingEmoji(m.text)}
-            paneId={m.pane_id}
-            onPane={onOpenPane}
-          />
-        {:else}
-          <ChatBubble
-            role={m.role === 'system' ? 'system' : m.role === 'user' ? 'user' : 'orchestrator'}
-            text={m.role === 'user' ? m.text : stripLeadingEmoji(m.text)}
-            onPane={onOpenPane}
-          />
-        {/if}
-      {/each}
-      {#each queued as q (q.at)}
-        <ChatBubble role="user" text={q.text} pending queued onPane={onOpenPane} />
-      {/each}
-    {/if}
+      {#if loading && !messages.length}
+        <Skeleton shape="bubble" />
+        <Skeleton shape="bubble" />
+        <Skeleton shape="bubble" />
+      {:else if !messages.length && !queued.length}
+        <EmptyState text="Ask what the fleet is doing" />
+      {:else}
+        {#each messages as m, i (m.id)}
+          {#if needsDivider(i)}
+            <TimeDivider label={clockTime(m.ts)} />
+          {/if}
+          <div class="row" class:fresh={m.id > historyMark}>
+            {#if m.role === 'event'}
+              <EventCard
+                kind={m.kind}
+                text={stripLeadingEmoji(m.text)}
+                paneId={m.pane_id}
+                onPane={onOpenPane}
+              />
+            {:else}
+              <ChatBubble
+                role={m.role === 'system' ? 'system' : m.role === 'user' ? 'user' : 'orchestrator'}
+                text={m.role === 'user' ? m.text : stripLeadingEmoji(m.text)}
+                onPane={onOpenPane}
+              />
+            {/if}
+          </div>
+        {/each}
+        {#each queued as q (q.at)}
+          <ChatBubble role="user" text={q.text} pending queued onPane={onOpenPane} />
+        {/each}
+      {/if}
 
-    {#if typing}
-      <TypingDots />
+      {#if typing}
+        <TypingDots />
+      {/if}
+    </div>
+
+    {#if showJump}
+      <button
+        class="jump"
+        onclick={() => {
+          atBottom = true;
+          showJump = false;
+          scrollToBottom();
+        }}>⌄ latest</button
+      >
     {/if}
   </div>
 
@@ -222,11 +302,52 @@
     max-width: 760px;
     margin: 0 auto;
   }
+  /* Containing block for the jump button, so it sits just above the composer
+     without a hardcoded offset. */
+  .scrollwrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
   .scroll {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     padding: 8px var(--pad-screen);
+    /* Held blank for the frame or two the pin takes, so the reader never sees
+       the view settle onto the newest message. */
+    opacity: 0;
+  }
+  .scroll.ready {
+    opacity: 1;
+    transition: opacity var(--d-fast) var(--ease-out);
+  }
+  /* The whole history mounts at once on open. Animating each bubble in made the
+     scroller grow under the pin, which is what left the view back in history.
+     History lands flat; only messages that arrive later animate. */
+  .row :global(.wrap),
+  .row :global(.card) {
+    animation: none;
+  }
+  .row.fresh :global(.wrap),
+  .row.fresh :global(.card) {
+    animation: block-in var(--d-base) var(--ease-out);
+  }
+  .jump {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 12px;
+    z-index: 2;
+    padding: 8px 14px;
+    border-radius: var(--r-chip);
+    background: var(--surface-2);
+    border: 1px solid var(--hairline);
+    color: var(--t-primary);
+    font-size: 13px;
+    animation: block-in var(--d-base) var(--ease-out);
   }
   .foot {
     flex: none;

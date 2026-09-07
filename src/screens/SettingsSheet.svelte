@@ -111,8 +111,8 @@
 
     <div class="about">
       <span class="t-label">About</span>
-      <p class="t-meta">Herdr {version} · build <span class="mono">{buildHash}</span></p>
-      <p class="t-meta">Spec: <span class="mono">~/src/herdr-app/DESIGN.md</span></p>
+      <p class="t-meta">Orcha {version} · build <span class="mono">{buildHash}</span></p>
+      <p class="t-meta">Spec: <span class="mono">~/src/orcha-app/DESIGN.md</span></p>
     </div>
   </div>
 </Sheet>

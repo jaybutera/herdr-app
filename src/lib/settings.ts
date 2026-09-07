@@ -32,6 +32,10 @@ export const DEFAULTS: Settings = {
   projectFilter: 'active',
 };
 
+// The app is Orcha now, but the storage keys keep the old name on purpose:
+// they address settings already written on Casper's phone. Renaming them
+// discards the bridge URL and the token, same as changing the applicationId
+// would. Not worth a tidier string.
 const KEY = 'herdr.settings';
 
 export function isTauri(): boolean {
@@ -50,6 +54,7 @@ async function tauriStore(): Promise<TauriStore | null> {
   if (!isTauri()) return null;
   if (!storePromise) {
     storePromise = import('@tauri-apps/plugin-store')
+      // Keeps its old filename for the reason given at KEY above.
       .then((m) => m.load('herdr.json', { autoSave: true }) as unknown as Promise<TauriStore>)
       .catch(() => null);
   }

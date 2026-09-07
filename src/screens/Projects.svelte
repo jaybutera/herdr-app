@@ -148,7 +148,7 @@
   });
 </script>
 
-<Header title="Herdr" onGear={() => (app.settingsOpen = true)}>
+<Header title="Orcha" onGear={() => (app.settingsOpen = true)}>
   {#snippet subtitle()}
     <SummaryLine
       running={totals.running}
