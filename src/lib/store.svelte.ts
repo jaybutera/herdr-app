@@ -3,7 +3,7 @@
 
 import { DEFAULTS, loadSettings, saveSettings, POLL_INTERVALS, type Settings } from './settings';
 import { paneIndex, type PaneIndex } from './live';
-import type { Pane } from './types';
+import type { Machine, Pane } from './types';
 
 export type Tab = 'fleet' | 'chat';
 
@@ -33,6 +33,8 @@ class AppStore {
   panes = $state<Pane[]>([]);
   /** False until the first pane poll lands; nothing is judged live before then. */
   panesKnown = $state(false);
+  /** Machines the bridge can reach. Empty until /machines has answered. */
+  machines = $state<Machine[]>([]);
   /** Set when chat has messages the user has not seen. */
   chatUnread = $state(false);
 
@@ -60,10 +62,29 @@ class AppStore {
     return paneIndex(this.panes);
   }
 
+  /**
+   * The machines the bridge knows about, from /machines when that has answered
+   * and otherwise from the machines the panes themselves name.
+   *
+   * Both are needed. /machines is the only thing that lists a machine with no
+   * panes on it, which is how a machine shows as offline rather than simply
+   * absent. The panes are the fallback for a bridge too old to serve
+   * /machines, and they arrive first.
+   */
+  get machineNames(): string[] {
+    const names = new Set(this.machines.map((m) => m.name));
+    for (const p of this.panes) if (p.machine) names.add(p.machine);
+    return [...names];
+  }
+
   /** Record a pane poll, including an empty-but-successful one. */
   setPanes(panes: Pane[]) {
     this.panes = panes;
     this.panesKnown = true;
+  }
+
+  setMachines(machines: Machine[]) {
+    this.machines = machines;
   }
 
   async init() {

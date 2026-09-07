@@ -4,6 +4,7 @@
 import type {
   ChatMessage,
   ChatState,
+  Machine,
   Pane,
   PaneRead,
   ProjectDetail,
@@ -156,6 +157,9 @@ export const projtrack = {
 
 export const bridge = {
   panes: (s: Settings) => request<{ panes: Pane[] }>(s.bridgeUrl, '/panes', s),
+
+  /** Which machines the bridge can reach, for showing one as offline. */
+  machines: (s: Settings) => request<{ machines: Machine[] }>(s.bridgeUrl, '/machines', s),
 
   pane: (s: Settings, paneId: string) =>
     request<Pane>(s.bridgeUrl, `/panes/${encodeURIComponent(paneId)}`, s),

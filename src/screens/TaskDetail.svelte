@@ -21,6 +21,7 @@
   import { app } from '../lib/store.svelte';
   import { ApiError, bridge, projtrack } from '../lib/api';
   import { parsePane, type Block } from '../lib/pane-parse';
+  import { machineForRef, paneIdForRef } from '../lib/pane-id';
   import { isSettled, liveTaskStatus } from '../lib/live';
   import { clockTime, dayKey, dayLabel, relativeTime, statusSpec } from '../lib/format';
   import type { AgentStatus, TaskDetail } from '../lib/types';
@@ -58,8 +59,19 @@
   let atBottom = $state(true);
   let showJump = $state(false);
 
+  /**
+   * The bridge pane id for this task's session.
+   *
+   * The ledger stores `box:w6:p1` and the bridge addresses `box/w6:p1`, so
+   * every call that reaches a pane goes through this rather than through
+   * session_ref directly. Local sessions come back unchanged.
+   */
+  const bridgePaneId = $derived(paneIdForRef(task?.session_ref, app.machineNames));
+  /** Which machine this session is on, shown when it is not this laptop. */
+  const sessionMachine = $derived(machineForRef(task?.session_ref, app.machineNames));
+
   /** The ledger crossed with the pane list, for the header and the banner. */
-  const live = $derived(task ? liveTaskStatus(task, app.paneIndex, app.panesKnown) : 'queued');
+  const live = $derived(task ? liveTaskStatus(task, app.paneIndex, app.panesKnown, app.machineNames) : 'queued');
 
   // Live mode still turns on for a ledger-running task whose agent has stopped:
   // the transcript is the most useful thing on screen, and the composer is how
@@ -111,7 +123,7 @@
   }
 
   async function readPane() {
-    const paneId = task?.session_ref;
+    const paneId = bridgePaneId;
     if (!paneId) return;
     try {
       const r = await bridge.read(app.settings, paneId);
@@ -146,7 +158,7 @@
   async function checkSession() {
     if (!task?.session_ref || task.status === 'running') return;
     try {
-      const p = await bridge.pane(app.settings, task.session_ref);
+      const p = await bridge.pane(app.settings, bridgePaneId);
       sessionAlive = true;
       paneLabel = p.label;
     } catch {
@@ -168,7 +180,7 @@
   }
 
   async function sendText(text: string) {
-    const paneId = task?.session_ref;
+    const paneId = bridgePaneId;
     if (!paneId) return;
     pending = [...pending, { text, at: Date.now() }];
     try {
@@ -182,7 +194,7 @@
   }
 
   async function sendKey(key: string) {
-    const paneId = task?.session_ref;
+    const paneId = bridgePaneId;
     if (!paneId) return;
     try {
       await bridge.keys(app.settings, paneId, [key]);
@@ -194,7 +206,7 @@
   }
 
   async function sendDigit(digit: string) {
-    const paneId = task?.session_ref;
+    const paneId = bridgePaneId;
     if (!paneId) return;
     try {
       await bridge.text(app.settings, paneId, digit);
@@ -261,7 +273,12 @@
   {#snippet subtitle()}
     {#if task}
       {#if isLive}
-        <LiveStatusLine agentStatus={headerStatus} paneId={task.session_ref} label={paneLabel} />
+        <LiveStatusLine
+          agentStatus={headerStatus}
+          paneId={task.session_ref}
+          machine={sessionMachine}
+          label={paneLabel}
+        />
       {:else}
         <div class="hist-status">
           <StatusDot domain="task" value={task.status} size={9} />

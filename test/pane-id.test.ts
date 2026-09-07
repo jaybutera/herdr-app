@@ -1,0 +1,134 @@
+// Translating a task's session_ref into a bridge pane id.
+//
+// The two spellings are both load-bearing. projtrack stores `box:w6:p1`
+// because that form is what a person types (`ssh box claude attach ...`); the
+// bridge addresses `box/w6:p1` because the slash is what lets a local id stay
+// bare and keeps the orchestrator's watcher and the Claude hooks working with
+// ids they already hold. Something has to convert between them, and getting it
+// wrong makes every session on another machine read as an orphan.
+
+import { describe, expect, it } from 'vitest';
+
+import { isRemote, machineForRef, paneIdForRef, parseSessionRef } from '../src/lib/pane-id';
+import { liveTaskStatus, paneIndex } from '../src/lib/live';
+import type { Pane, Task } from '../src/lib/types';
+
+const MACHINES = ['local', 'box', 'hub'];
+
+describe('parseSessionRef', () => {
+  it('splits a pane session on another machine', () => {
+    expect(parseSessionRef('box:w6:p1', MACHINES)).toEqual({
+      machine: 'box',
+      id: 'w6:p1',
+      paneId: 'box/w6:p1',
+    });
+  });
+
+  it('splits a background session on another machine', () => {
+    expect(parseSessionRef('box:93ee19ff', MACHINES)).toEqual({
+      machine: 'box',
+      id: '93ee19ff',
+      paneId: 'box/93ee19ff',
+    });
+  });
+
+  it('leaves a local pane id alone despite its colon', () => {
+    // `w95` is not a machine, so the whole string is the id.
+    expect(parseSessionRef('w95:p1', MACHINES)).toEqual({
+      machine: 'local',
+      id: 'w95:p1',
+      paneId: 'w95:p1',
+    });
+  });
+
+  it('does not invent a machine before the machine list arrives', () => {
+    // With no list, treating any leading word as a machine would mangle every
+    // local pane id. Reading a remote one as local for a poll is the lesser
+    // error and corrects itself.
+    expect(parseSessionRef('box:w6:p1', []).machine).toBe('local');
+    expect(parseSessionRef('w95:p1', []).paneId).toBe('w95:p1');
+  });
+
+  it('handles an empty or missing ref', () => {
+    for (const ref of ['', null, undefined]) {
+      expect(parseSessionRef(ref, MACHINES)).toEqual({ machine: 'local', id: '', paneId: '' });
+    }
+  });
+
+  it('does not treat the literal name "local" as a prefix', () => {
+    // A ref is never written that way, and stripping it would produce a pane
+    // id the bridge does not know.
+    expect(parseSessionRef('local:w1:p1', MACHINES).paneId).toBe('local:w1:p1');
+  });
+
+  it('ignores a leading colon', () => {
+    expect(parseSessionRef(':w1:p1', MACHINES).paneId).toBe(':w1:p1');
+  });
+});
+
+describe('helpers', () => {
+  it('paneIdForRef is the pane half', () => {
+    expect(paneIdForRef('box:w6:p1', MACHINES)).toBe('box/w6:p1');
+    expect(paneIdForRef('w95:p1', MACHINES)).toBe('w95:p1');
+  });
+
+  it('machineForRef is the machine half', () => {
+    expect(machineForRef('box:w6:p1', MACHINES)).toBe('box');
+    expect(machineForRef('w95:p1', MACHINES)).toBe('local');
+  });
+
+  it('only a machine that is not this laptop is worth badging', () => {
+    expect(isRemote('box')).toBe(true);
+    expect(isRemote('local')).toBe(false);
+    expect(isRemote('')).toBe(false);
+  });
+});
+
+describe('liveTaskStatus across machines', () => {
+  const pane = (id: string, machine: string, agent_status: Pane['agent_status']): Pane => ({
+    pane_id: id,
+    machine,
+    workspace_id: id.split(':')[0],
+    label: 'demo',
+    cwd: '/tmp',
+    agent_status,
+  });
+
+  const task = (session_ref: string): Task => ({
+    id: 1,
+    project_id: 1,
+    title: 'demo',
+    status: 'running',
+    session_ref,
+    result_summary: '',
+    created_at: '',
+    updated_at: '',
+  });
+
+  it('finds the pane for a session on another machine', () => {
+    // The regression this exists for: without the translation the lookup misses
+    // and a session running fine on box is reported as an orphan.
+    const panes = paneIndex([pane('box/w6:p1', 'box', 'working')]);
+    expect(liveTaskStatus(task('box:w6:p1'), panes, true, MACHINES)).toBe('running');
+  });
+
+  it('still finds a local pane', () => {
+    const panes = paneIndex([pane('w95:p1', 'local', 'working')]);
+    expect(liveTaskStatus(task('w95:p1'), panes, true, MACHINES)).toBe('running');
+  });
+
+  it('a remote session whose pane is gone is an orphan', () => {
+    const panes = paneIndex([pane('box/w9:p1', 'box', 'working')]);
+    expect(liveTaskStatus(task('box:w6:p1'), panes, true, MACHINES)).toBe('orphan');
+  });
+
+  it('a remote pane sitting idle reads as stalled, same as a local one', () => {
+    const panes = paneIndex([pane('box/w6:p1', 'box', 'idle')]);
+    expect(liveTaskStatus(task('box:w6:p1'), panes, true, MACHINES)).toBe('stalled');
+  });
+
+  it('a remote pane waiting on Casper reads as blocked', () => {
+    const panes = paneIndex([pane('box/w6:p1', 'box', 'blocked')]);
+    expect(liveTaskStatus(task('box:w6:p1'), panes, true, MACHINES)).toBe('blocked');
+  });
+});

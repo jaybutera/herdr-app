@@ -34,10 +34,10 @@
   // group is what Casper actually has to deal with.
   const ledgerRunning = $derived(project?.tasks.filter((t) => t.status === 'running') ?? []);
   const running = $derived(
-    ledgerRunning.filter((t) => !isSettled(liveTaskStatus(t, app.paneIndex, app.panesKnown)))
+    ledgerRunning.filter((t) => !isSettled(liveTaskStatus(t, app.paneIndex, app.panesKnown, app.machineNames)))
   );
   const needsReview = $derived(
-    ledgerRunning.filter((t) => isSettled(liveTaskStatus(t, app.paneIndex, app.panesKnown)))
+    ledgerRunning.filter((t) => isSettled(liveTaskStatus(t, app.paneIndex, app.panesKnown, app.machineNames)))
   );
   const queued = $derived(project?.tasks.filter((t) => t.status === 'queued') ?? []);
   const finished = $derived(

@@ -67,15 +67,24 @@ export interface TaskDetail extends Task {
 }
 
 export interface Pane {
+  /** `w95:p1` on this laptop, `box/w1:p1` on another machine. */
   pane_id: string;
+  /** Which machine the pane is on. 'local' is this laptop. */
+  machine: string;
   workspace_id: string;
   label: string;
   cwd: string;
   agent_status: AgentStatus;
 }
 
+export interface Machine {
+  name: string;
+  reachable: boolean;
+}
+
 export interface PaneRead {
   pane_id: string;
+  machine?: string;
   agent_status: AgentStatus;
   read_at: string;
   text: string;

@@ -46,12 +46,18 @@
    *  pulsing dot next to a task whose agent stopped hours ago. */
   const previews = $derived(
     running.map((t) => {
-      const live = liveTaskStatus(t, app.paneIndex, app.panesKnown);
+      const live = liveTaskStatus(t, app.paneIndex, app.panesKnown, app.machineNames);
       return { task: t, live, settled: isSettled(live) };
     })
   );
   const counts = $derived(
-    liveCounts(project.task_counts, project.running_tasks ?? [], app.paneIndex, app.panesKnown)
+    liveCounts(
+      project.task_counts,
+      project.running_tasks ?? [],
+      app.paneIndex,
+      app.panesKnown,
+      app.machineNames
+    )
   );
 </script>
 

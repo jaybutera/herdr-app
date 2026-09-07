@@ -5,16 +5,21 @@
   import { since, statusSpec } from '../lib/format';
   import { app } from '../lib/store.svelte';
   import { isSettled, liveTaskStatus } from '../lib/live';
+  import { isRemote, machineForRef } from '../lib/pane-id';
   import type { Task } from '../lib/types';
 
   let { task, onOpen }: { task: Task; onOpen: () => void } = $props();
 
   /** The ledger crossed with the pane. A task the ledger calls running but whose
    *  agent has stopped reads "Agent finished", not "Running". */
-  const live = $derived(liveTaskStatus(task, app.paneIndex, app.panesKnown));
+  const live = $derived(liveTaskStatus(task, app.paneIndex, app.panesKnown, app.machineNames));
   const settled = $derived(isSettled(live));
   /** Still moving: keep the live pane id and elapsed line. */
   const active = $derived(live === 'running' || live === 'blocked');
+  /** The machine, badged only when it is not this laptop. Local is unmarked:
+   *  a badge on every row would carry no information. */
+  const machine = $derived(machineForRef(task.session_ref, app.machineNames));
+  const remote = $derived(isRemote(machine));
 
   /** Running: pane id plus "started N ago". Finished: the first two lines of
    *  result_summary. Queued: nothing. */
@@ -34,6 +39,7 @@
     <span class="t-body title">{task.title}</span>
     {#if active}
       <span class="t-meta sub">
+        {#if remote}<span class="machine mono">{machine}</span> {/if}
         {#if task.session_ref}<span class="mono pane">{task.session_ref}</span> · {/if}
         {since(task.updated_at, 'started')}
       </span>
@@ -42,6 +48,7 @@
            whose turn it now is. -->
       <span class="t-meta sub">
         <span class="flag">{statusSpec('live', live).label}</span>
+        {#if remote} · <span class="machine mono">{machine}</span>{/if}
         {#if task.session_ref} · <span class="mono pane">{task.session_ref}</span>{/if}
         · {since(task.updated_at, 'started')}
       </span>
@@ -104,6 +111,14 @@
   }
   .pane {
     color: var(--t-secondary);
+  }
+  .machine {
+    padding: 0 5px;
+    border-radius: var(--r-chip);
+    background: var(--surface-2);
+    border: 1px solid var(--hairline);
+    color: var(--t-secondary);
+    font-size: 0.9em;
   }
   /* A task the ledger has not caught up on. The row keeps full contrast: this
      is work waiting on Casper, not history to be dimmed. */

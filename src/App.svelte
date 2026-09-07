@@ -86,6 +86,15 @@
         // The bridge may not be up. `panesKnown` stays as it was, so screens
         // fall back to the ledger rather than calling every session an orphan.
       }
+      try {
+        const m = await bridge.machines(app.settings);
+        app.setMachines(m.machines ?? []);
+      } catch {
+        // A bridge without /machines is an older one. The machines named by
+        // the panes themselves still come through, so a session on another
+        // machine keeps resolving; what is lost is only knowing about a
+        // machine that currently has no panes on it.
+      }
     };
     void pollPanes();
     const paneTimer = setInterval(pollPanes, app.intervals.projects);

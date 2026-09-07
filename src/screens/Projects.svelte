@@ -40,7 +40,7 @@
     let running = 0;
     let review = 0;
     for (const t of p.running_tasks ?? []) {
-      if (isSettled(liveTaskStatus(t, app.paneIndex, app.panesKnown))) review += 1;
+      if (isSettled(liveTaskStatus(t, app.paneIndex, app.panesKnown, app.machineNames))) review += 1;
       else running += 1;
     }
     return { running, review };

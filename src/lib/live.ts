@@ -16,6 +16,7 @@
 // Everything else, including a finished task's own ledger row, is left alone:
 // once a task is done, done is the truth and no pane can contradict it.
 
+import { paneIdForRef } from './pane-id';
 import type { AgentStatus, Pane, Task, TaskCounts } from './types';
 
 /** What the UI shows for a task, after the live pane has its say. */
@@ -46,12 +47,20 @@ export function paneIndex(panes: readonly Pane[]): PaneIndex {
  * gone": the bridge can be down or still on its first poll, and reporting a
  * fleet of orphans in that window would be its own false claim.
  */
-export function liveTaskStatus(task: Task, panes: PaneIndex, panesKnown: boolean): LiveTaskStatus {
+export function liveTaskStatus(
+  task: Task,
+  panes: PaneIndex,
+  panesKnown: boolean,
+  machines: readonly string[] = []
+): LiveTaskStatus {
   if (task.status !== 'running') return task.status;
   if (!panesKnown) return 'running';
   if (!task.session_ref) return 'orphan';
 
-  const pane = panes.get(task.session_ref);
+  // The ledger spells a remote session `box:w6:p1` and the pane list spells it
+  // `box/w6:p1`. Looking the ref up unchanged misses every session on another
+  // machine and reports a healthy one as an orphan.
+  const pane = panes.get(paneIdForRef(task.session_ref, machines));
   if (!pane) return 'orphan';
 
   switch (pane.agent_status) {
@@ -76,11 +85,16 @@ export function isSettled(s: LiveTaskStatus): boolean {
 }
 
 /** Tasks still genuinely moving, for the counts a screen shows. */
-export function countLive(tasks: readonly Task[], panes: PaneIndex, panesKnown: boolean) {
+export function countLive(
+  tasks: readonly Task[],
+  panes: PaneIndex,
+  panesKnown: boolean,
+  machines: readonly string[] = []
+) {
   let running = 0;
   let attention = 0;
   for (const t of tasks) {
-    const s = liveTaskStatus(t, panes, panesKnown);
+    const s = liveTaskStatus(t, panes, panesKnown, machines);
     if (s === 'running') running += 1;
     else if (s === 'blocked' || isSettled(s)) attention += 1;
   }
@@ -95,7 +109,8 @@ export function liveCounts(
   counts: TaskCounts | undefined,
   runningTasks: readonly Task[],
   panes: PaneIndex,
-  panesKnown: boolean
+  panesKnown: boolean,
+  machines: readonly string[] = []
 ): TaskCounts & { needsReview: number } {
   const base: TaskCounts = {
     queued: counts?.queued ?? 0,
@@ -111,7 +126,7 @@ export function liveCounts(
   let stillRunning = 0;
   let needsReview = 0;
   for (const t of runningTasks) {
-    const s = liveTaskStatus(t, panes, panesKnown);
+    const s = liveTaskStatus(t, panes, panesKnown, machines);
     if (s === 'running') stillRunning += 1;
     else needsReview += 1;
   }
