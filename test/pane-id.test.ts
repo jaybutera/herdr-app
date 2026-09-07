@@ -153,10 +153,15 @@ describe('isRefUnresolved', () => {
     expect(isRefUnresolved('box:wC:p1', MACHINES)).toBe(false);
   });
 
-  it('is false for a local pane id whatever the machine list says', () => {
-    // `w95:p1` addresses the same pane before and after the list lands, so
-    // waiting on it would stall a local session for no reason.
+  it('is false for a local pane id once any machine list has arrived', () => {
     expect(isRefUnresolved('w95:p1', MACHINES)).toBe(false);
+  });
+
+  it('waits on a local pane id too while no machine list has arrived', () => {
+    // Not a special case for local: `w95:p1` and `box:wC:p1` are the same shape,
+    // and with no list there is nothing to tell them apart by. Waiting out a
+    // local session for one pane poll is cheaper than reading a remote pane by
+    // an id the bridge never issued and calling a working session dead.
     expect(isRefUnresolved('w95:p1', [])).toBe(true);
   });
 

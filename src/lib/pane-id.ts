@@ -76,8 +76,16 @@ export function isRemote(machine: string): boolean {
  * is running fine, so a caller that reaches a pane has to wait rather than
  * treat the miss as an answer.
  *
- * A local ref is never unresolved: `w95:p1` addresses the same pane whether or
- * not the machine list has arrived.
+ * The one thing this cannot do is tell a local pane id from a remote one whose
+ * machine has not been listed: `w95:p1` and `box:wC:p1` are the same shape, and
+ * the machine list is the only thing that separates them. So with no list at
+ * all, both are reported unresolved. That waits out a local session for as long
+ * as the first pane poll takes, which is the cheaper error: the other way round
+ * reads a remote pane by an id the bridge never issued and calls a working
+ * session dead.
+ *
+ * Once any list has arrived the wait is over either way, including for a head
+ * the list does not name. Waiting longer there would never change the answer.
  */
 export function isRefUnresolved(
   ref: string | null | undefined,
@@ -85,12 +93,12 @@ export function isRefUnresolved(
 ): boolean {
   const text = String(ref ?? '');
   if (!text) return false;
-  // Already resolved against a known machine, or genuinely local.
+  // The head is a machine the list names, so the ref is resolved.
   if (parseSessionRef(text, machines).machine !== LOCAL) return false;
-  // A colon-prefixed head that is not a known machine is either a local pane id
-  // (`w95:p1`) or a remote one whose machine has not been listed yet. Only the
-  // second is worth waiting on, and the two are told apart by whether any
-  // machine list has arrived at all.
+  // A colon-headed ref whose head is not a known machine is either a local pane
+  // id (`w95:p1`) or a remote one whose machine has not been listed yet. Nothing
+  // in the string separates them; the only usable signal is whether any machine
+  // list has arrived at all, so with none, wait.
   const colon = text.indexOf(':');
   if (colon <= 0) return false;
   return machines.length === 0;

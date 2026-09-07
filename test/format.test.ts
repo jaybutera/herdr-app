@@ -50,6 +50,16 @@ describe('statusSpec', () => {
   it('falls back rather than throwing on a status it has never seen', () => {
     expect(statusSpec('pane', 'brand-new-state').label).toBe('Unknown');
   });
+
+  // Nit 2. The header needs a word for "the ref has not resolved, so nothing has
+  // been read and the pane list cannot be looked up either". Both of the words
+  // it had claim something: "Working" that an agent is mid-turn, "No agent" that
+  // there is none.
+  it('has a word for a session that has not been located yet', () => {
+    expect(statusSpec('pane', 'pending').label).toBe('Finding session');
+    expect(statusSpec('pane', 'pending').label).not.toBe(statusSpec('pane', 'working').label);
+    expect(statusSpec('pane', 'pending').label).not.toBe(statusSpec('pane', 'unknown').label);
+  });
 });
 
 describe('stripLeadingEmoji', () => {

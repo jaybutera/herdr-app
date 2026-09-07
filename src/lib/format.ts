@@ -72,6 +72,9 @@ const PANE: Record<string, StatusSpec> = {
   done: { color: 'var(--c-done)', glyph: 'check', label: 'Finished' },
   unknown: { color: 'var(--c-dead)', glyph: 'question', label: 'No agent' },
   gone: { color: 'var(--c-dead)', glyph: 'slashed', label: 'Pane gone' },
+  // Nothing has been read yet and the ref cannot be looked up in the pane list
+  // either, so neither "Working" nor "No agent" is a claim the app can make.
+  pending: { color: 'var(--c-muted)', glyph: 'hollow', label: 'Finding session' },
 };
 
 /**
