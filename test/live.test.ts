@@ -167,17 +167,38 @@ describe('paneIsGone', () => {
 });
 
 describe('shouldPollPane', () => {
-  const base = { hasSession: true, ledgerRunning: true, forceLive: false, refPending: false };
+  const base = {
+    hasSession: true,
+    ledgerRunning: true,
+    forceLive: false,
+    refPending: false,
+    paneReallyGone: false,
+  };
 
   it('polls a running task that has a session', () => {
     expect(shouldPollPane(base)).toBe(true);
   });
 
-  // The second half of the bug: the poll used to be gated on the same flag the
-  // 404 set, so one 404 stopped the only code that could clear it. The poll has
-  // to survive a 404 or the screen can never correct itself.
-  it('keeps polling regardless of a pane that 404d', () => {
-    expect(shouldPollPane(base)).toBe(true);
+  // The second half of the bug was the poll being gated on the flag the 404 set,
+  // so one 404 stopped the only code that could clear it. `paneGone` is
+  // deliberately not an argument here, which is why nothing this function is
+  // given can express that case: it is tested against the real screen in
+  // test/task-detail.component.test.ts, where a bridge 404s and then answers.
+  //
+  // What is an argument is `paneReallyGone`, the 404 the pane list corroborated.
+  // Gating on that does not latch, because the pane list keeps arriving whether
+  // or not this screen reads anything.
+  it('stops polling once the pane list agrees the pane is gone', () => {
+    expect(shouldPollPane({ ...base, paneReallyGone: true })).toBe(false);
+  });
+
+  it('polls again as soon as the pane list stops agreeing', () => {
+    expect(shouldPollPane({ ...base, paneReallyGone: false })).toBe(true);
+  });
+
+  it('treats a missing paneReallyGone as not gone', () => {
+    const { paneReallyGone: _omitted, ...withoutFlag } = base;
+    expect(shouldPollPane(withoutFlag)).toBe(true);
   });
 
   it('waits while the ref cannot be turned into a bridge pane id', () => {

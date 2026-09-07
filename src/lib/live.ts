@@ -153,17 +153,31 @@ export function paneIsGone(paneGone: boolean, live: LiveTaskStatus): boolean {
 /**
  * Whether the pane poll should keep running.
  *
- * Deliberately not the same condition as the live view. Gating the poll on a
- * flag that a 404 sets makes that 404 permanent: the only thing that can clear
- * it is the read the gate has just switched off. The poll runs while the task
- * claims a session and the ref can be addressed; what the read finds is then
- * free to change its mind.
+ * Deliberately not gated on the 404 itself. Gating the poll on a flag that a 404
+ * sets makes that 404 permanent: the only thing that can clear it is the read
+ * the gate has just switched off. The poll runs while the task claims a session
+ * and the ref can be addressed; what the read finds is then free to change its
+ * mind.
+ *
+ * `paneReallyGone` is a different signal and safe to gate on. It is `paneIsGone`,
+ * a 404 the pane list has corroborated, and the list keeps arriving from
+ * App's own poll whether or not this screen reads anything. So a pane that comes
+ * back turns the gate off again, while a ledger-running task whose pane is
+ * genuinely gone stops firing a read every pane interval. Each of those reads
+ * costs the bridge a `herdr pane read` exec, over the ssh forward for a remote
+ * machine, to be told the same 404 again.
  */
 export function shouldPollPane(opts: {
   hasSession: boolean;
   ledgerRunning: boolean;
   forceLive: boolean;
   refPending: boolean;
+  paneReallyGone?: boolean;
 }): boolean {
-  return opts.hasSession && (opts.ledgerRunning || opts.forceLive) && !opts.refPending;
+  return (
+    opts.hasSession &&
+    (opts.ledgerRunning || opts.forceLive) &&
+    !opts.refPending &&
+    !opts.paneReallyGone
+  );
 }

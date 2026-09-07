@@ -35,6 +35,7 @@ vi.mock('../src/lib/api', async () => {
 });
 
 const { default: TaskDetail } = await import('../src/screens/TaskDetail.svelte');
+const { app: store } = await import('../src/lib/store.svelte');
 
 /** Task 103 as projtrack actually holds it. */
 const TASK_103: TaskDetailShape = {
@@ -77,12 +78,19 @@ function bridgeAnsweringOnlyFor(paneId: string) {
   });
 }
 
+// Fake timers, so the pane poll can be advanced rather than waited on: several
+// of these tests are about what the screen does on the ticks after the first,
+// and the poll interval is seconds. `setTimeout` is left real so `flush` still
+// yields to the microtask queue and to Svelte's own scheduling.
 const flush = async () => {
   for (let i = 0; i < 5; i += 1) await Promise.resolve();
-  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => realSetTimeout(r, 0));
 };
 
+const realSetTimeout = globalThis.setTimeout;
+
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
   vi.clearAllMocks();
   task.mockResolvedValue(TASK_103);
   panes.mockResolvedValue(BOX_PANE);
@@ -90,8 +98,12 @@ beforeEach(() => {
   app.setPanes([]);
   app.setMachines([]);
   app.panesKnown = false;
+  store.failures = 0;
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 const draw = () => render(TaskDetail, { props: { taskId: 103, onBack: () => {} } });
 
@@ -185,5 +197,250 @@ describe('a session running on this laptop', () => {
 
     expect(reads).toHaveBeenCalledWith(expect.anything(), 'w9K:p1');
     expect(screen.queryByText('Pane gone')).toBeNull();
+  });
+});
+
+// Should-fix 4. The latch: a 404 must not be able to switch off the only poll
+// that could have corrected it. `shouldPollPane` cannot be tested for this from
+// its arguments alone, because the flag the 404 sets is deliberately not one of
+// them; it takes the screen, a bridge that 404s, and then answers.
+describe('a read that 404s while the pane list says the session is working', () => {
+  beforeEach(() => {
+    app.setPanes([BOX_PANE]);
+    app.setMachines(MACHINES);
+    app.panesKnown = true;
+  });
+
+  it('does not say "Pane gone" on a 404 the list contradicts', async () => {
+    // The bridge answers for nothing at all: every read 404s.
+    reads.mockImplementation(async () => {
+      throw new ApiError('HTTP 404', 404);
+    });
+
+    draw();
+    await flush();
+
+    expect(reads).toHaveBeenCalled();
+    expect(screen.queryByText('Pane gone')).toBeNull();
+  });
+
+  it('keeps reading after the 404, and shows the transcript once one answers', async () => {
+    // One 404, then the bridge starts answering. Nothing navigates away in
+    // between; the screen has to correct itself where it stands.
+    let first = true;
+    reads.mockImplementation(async (_s: unknown, id: string) => {
+      if (first) {
+        first = false;
+        throw new ApiError('HTTP 404', 404);
+      }
+      return {
+        pane_id: id,
+        machine: 'box',
+        agent_status: 'working' as const,
+        read_at: '2026-09-07T19:56:23Z',
+        text: '● Now the sendrawtransaction handler:',
+      };
+    });
+
+    draw();
+    await flush();
+    expect(screen.queryByText(/sendrawtransaction/)).toBeNull();
+
+    // The poll fires again on its own; nothing about the screen changed.
+    await vi.advanceTimersByTimeAsync(6000);
+    await flush();
+
+    expect(reads.mock.calls.length).toBeGreaterThan(1);
+    expect(screen.getByText(/sendrawtransaction/)).toBeTruthy();
+    expect(screen.queryByText('Pane gone')).toBeNull();
+  });
+});
+
+// Should-fix 2. The other side of the same coin. A 404 the pane list agrees with
+// is an answer, and re-asking costs the bridge a `herdr pane read` exec every
+// pane interval, over the ssh forward when the machine is remote.
+describe('a read that 404s for a pane the list agrees is gone', () => {
+  beforeEach(() => {
+    task.mockResolvedValue({ ...TASK_103, session_ref: 'box:wZZ:p1' });
+    app.setPanes([BOX_PANE]); // wZZ:p1 is not in it
+    app.setMachines(MACHINES);
+    app.panesKnown = true;
+    reads.mockImplementation(async () => {
+      throw new ApiError('HTTP 404', 404);
+    });
+  });
+
+  it('stops reading rather than 404ing every pane interval', async () => {
+    draw();
+    await flush();
+
+    expect(screen.getByText('Pane gone')).toBeTruthy();
+    const after = reads.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flush();
+
+    expect(reads.mock.calls.length).toBe(after);
+  });
+
+  it('reads again if the pane comes back into the list', async () => {
+    draw();
+    await flush();
+    const stopped = reads.mock.calls.length;
+
+    // The gate is the pane list, which keeps arriving from App's own poll. So
+    // the screen can be told the pane is back without ever reading it.
+    bridgeAnsweringOnlyFor('box/wZZ:p1');
+    app.setPanes([BOX_PANE, { ...BOX_PANE, pane_id: 'box/wZZ:p1', workspace_id: 'wZZ' }]);
+    await flush();
+    await vi.advanceTimersByTimeAsync(6000);
+    await flush();
+
+    expect(reads.mock.calls.length).toBeGreaterThan(stopped);
+    expect(screen.queryByText('Pane gone')).toBeNull();
+  });
+});
+
+// Should-fix 5. The bridge answers 503 for a read against a machine it cannot
+// reach. It answered, so it is up; treating that as a bridge failure put "Can't
+// reach the pane bridge" on screen and tripped the OfflineStrip through
+// app.failures while projtrack and the bridge were both fine.
+describe('a session on a machine the bridge cannot reach', () => {
+  beforeEach(() => {
+    app.setPanes([BOX_PANE]);
+    app.setMachines(MACHINES);
+    app.panesKnown = true;
+    store.failures = 0;
+    reads.mockImplementation(async () => {
+      throw new ApiError('HTTP 503', 503);
+    });
+  });
+
+  it('names the machine rather than blaming the bridge', async () => {
+    draw();
+    await flush();
+
+    expect(screen.queryByText(/Can't reach the pane bridge/)).toBeNull();
+    expect(screen.getByText(/Can't reach box/)).toBeTruthy();
+  });
+
+  it('does not count toward the offline strip', async () => {
+    // The task poll is stopped for the length of this test. It succeeds every 15
+    // seconds and calls noteSuccess, which would reset the counter and let this
+    // pass whether or not the 503 was ever excluded from it.
+    let loaded = false;
+    task.mockImplementation(async () => {
+      if (loaded) await new Promise(() => {});
+      loaded = true;
+      return TASK_103;
+    });
+
+    draw();
+    await flush();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flush();
+
+    // Several 503s have now been answered. The bridge is up; nothing is offline.
+    expect(reads.mock.calls.length).toBeGreaterThan(1);
+    expect(store.failures).toBe(0);
+    expect(store.offline).toBe(false);
+  });
+
+  it('still raises the bridge banner for a failure that is not a 503', async () => {
+    // The 503 path must not swallow the case it was carved out of: a read that
+    // never landed is still a bridge that cannot be reached.
+    reads.mockImplementation(async () => {
+      throw new ApiError('Network error', 0);
+    });
+
+    draw();
+    await flush();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flush();
+
+    expect(screen.getByText(/Can't reach the pane bridge/)).toBeTruthy();
+    expect(screen.queryByText(/Can't reach box/)).toBeNull();
+  });
+
+  it('does not blame a machine for a session on this laptop', async () => {
+    // `sessionMachine` is 'local' both for a genuinely local pane and for a
+    // remote ref that has not resolved, so a 503 here must not name it.
+    task.mockResolvedValue({ ...TASK_103, session_ref: 'w9K:p1' });
+    app.setPanes([{ ...BOX_PANE, pane_id: 'w9K:p1', machine: 'local', workspace_id: 'w9K' }]);
+
+    draw();
+    await flush();
+
+    expect(screen.queryByText(/Can't reach local/)).toBeNull();
+  });
+
+  it('names the machine when /machines is what reports it down', async () => {
+    // No read has failed; the bridge's own machine list says box is unreachable.
+    bridgeAnsweringOnlyFor('box/wC:p1');
+    app.setMachines([{ name: 'local', reachable: true }, { name: 'box', reachable: false }]);
+
+    draw();
+    await flush();
+
+    expect(screen.getByText(/Can't reach box/)).toBeTruthy();
+  });
+});
+
+// Nit 7. Before the machine list lands there is no id to send to. The composer
+// was live in that window and a send went out as the raw ref, which 404s.
+describe('sending before the ref resolves', () => {
+  it('disables the composer rather than sending to an id the bridge lacks', async () => {
+    draw();
+    await flush();
+
+    // The window the pane read already waits out.
+    expect(reads).not.toHaveBeenCalled();
+    const box = screen.getByPlaceholderText('Message this session…') as HTMLTextAreaElement;
+    expect(box.disabled).toBe(true);
+  });
+
+  it('enables it once the machine list arrives', async () => {
+    draw();
+    await flush();
+
+    app.setPanes([BOX_PANE]);
+    app.setMachines(MACHINES);
+    app.panesKnown = true;
+    await flush();
+
+    const box = screen.getByPlaceholderText('Message this session…') as HTMLTextAreaElement;
+    expect(box.disabled).toBe(false);
+  });
+});
+
+// Nit 2. While the ref is pending nothing has read the pane and the pane list
+// cannot be looked up either, so the header had only the ledger to go on and
+// rendered "Working" above a body that said "Reading pane…".
+describe('the header while the ref is pending', () => {
+  it('does not claim the agent is working on the ledger word alone', async () => {
+    draw();
+    await flush();
+
+    expect(screen.queryByText('Working')).toBeNull();
+    expect(screen.getByText('Finding session')).toBeTruthy();
+  });
+
+  it('does not claim there is no agent either', async () => {
+    draw();
+    await flush();
+
+    expect(screen.queryByText('No agent')).toBeNull();
+  });
+
+  it('says Working once the pane has actually been read', async () => {
+    draw();
+    await flush();
+
+    app.setPanes([BOX_PANE]);
+    app.setMachines(MACHINES);
+    app.panesKnown = true;
+    await flush();
+
+    expect(screen.getByText('Working')).toBeTruthy();
   });
 });
