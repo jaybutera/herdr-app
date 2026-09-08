@@ -45,6 +45,11 @@
    *  arrive after this animate in, so the scroller never grows under the pin. */
   let historyMark = $state(0);
 
+  /** What one `/chat/messages` request answers with. The daemon caps it too. */
+  const PAGE = 100;
+  /** MAX_IN_MEMORY on the daemon is 1000, so ten pages is the whole log. */
+  const MAX_PAGES = 12;
+
   const lastId = $derived(messages.length ? messages[messages.length - 1].id : 0);
   // TypingDots show while busy, or within 20s of sending, whichever is longer.
   const typing = $derived(
@@ -54,13 +59,48 @@
   const workingCount = $derived(agents.filter((a) => a.agent_status === 'working').length);
   const blockedCount = $derived(agents.filter((a) => a.agent_status === 'blocked').length);
 
+  /**
+   * Everything after `id`, however many pages that takes.
+   *
+   * `/chat/messages` answers a page at a time, and a full page means there is
+   * more behind it. Following it here rather than letting the 3 s poll take one
+   * page per tick is what stops a backlog from being replayed through the view:
+   * the screen is pinned to the newest message it holds, so a page per tick is
+   * a visible jump per tick until the backlog runs out. Casper's phone stops
+   * polling whenever the app is backgrounded, so the backlog on return is
+   * routinely longer than a page.
+   */
+  async function drainAfter(id: number): Promise<ChatMessage[]> {
+    const out: ChatMessage[] = [];
+    let cursor = id;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const r = await chat.messages(app.settings, { after: cursor, limit: PAGE });
+      const got = r.messages ?? [];
+      out.push(...got);
+      if (got.length < PAGE) break;
+      cursor = got[got.length - 1].id;
+    }
+    return out;
+  }
+
   async function loadInitial() {
     try {
       const [msgs, st] = await Promise.all([
-        chat.messages(app.settings, { limit: 100 }),
+        chat.messages(app.settings, { limit: PAGE }),
         chat.state(app.settings).catch(() => null),
       ]);
-      messages = msgs.messages ?? [];
+      let history = msgs.messages ?? [];
+      // An unbounded request means "the newest PAGE messages", and a daemon
+      // that answers with the oldest instead leaves the present unfetched. That
+      // is exactly what happened: the chat opened 611 messages back and the
+      // poll walked it forward a page at a time. The daemon is fixed, but the
+      // app is on a phone and the daemon is on the laptop, so they update on
+      // their own schedules; following the pages to the end here means the
+      // first painted frame is the newest message against either one.
+      if (history.length === PAGE) {
+        history = [...history, ...(await drainAfter(history[history.length - 1].id))];
+      }
+      messages = history;
       historyMark = messages.length ? messages[messages.length - 1].id : 0;
       if (st) chatState = st;
       error = null;
@@ -79,11 +119,10 @@
 
   async function poll() {
     try {
-      const [msgs, st] = await Promise.all([
-        chat.messages(app.settings, { after: lastId }),
+      const [fresh, st] = await Promise.all([
+        drainAfter(lastId),
         chat.state(app.settings).catch(() => null),
       ]);
-      const fresh = msgs.messages ?? [];
       if (fresh.length) {
         messages = [...messages, ...fresh];
         // Anything the daemon accepted clears the matching local echo.

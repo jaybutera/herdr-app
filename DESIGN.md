@@ -106,6 +106,15 @@ to Telegram also land here; messages typed here go through the same
 | `GET /chat/stream` (SSE, optional) | one `Message` JSON per event; UI falls back to polling `messages` every 3 s while the Chat tab is visible |
 | `GET /chat/state` | `{ busy: bool, muted: bool, agents: [ {pane_id, label, agent_status, cwd} ] }`; `busy` is true while the orchestrator is mid-turn |
 
+`limit` without `after` or `before` means **the newest `limit` messages**, not
+the oldest: the app opens the chat with that call and pins to the last message
+in the response. A daemon that answered with the oldest instead opened the chat
+hundreds of messages back and let the `after` poll walk it forward one page per
+tick, which read as the view jumping down the history for twenty seconds. With
+`after`, the response is the oldest of the newer messages, because that caller
+is filling a gap in a history it already holds; the app follows full pages to
+the end itself rather than taking one per poll.
+
 ```
 Message {
   id:      integer, monotonic
