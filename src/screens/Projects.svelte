@@ -11,6 +11,7 @@
   import { app } from '../lib/store.svelte';
   import { projtrack } from '../lib/api';
   import { isSettled, liveTaskStatus } from '../lib/live';
+  import { DEFAULT_DORMANT_AFTER_HOURS, wentDormant } from '../lib/dormancy';
   import type { ProjectStatus, Summary, SummaryProject } from '../lib/types';
   import { onMount } from 'svelte';
 
@@ -103,7 +104,12 @@
   async function load(quiet = false) {
     if (quiet) refreshing = true;
     try {
-      summary = await projtrack.summary(app.settings);
+      const next = await projtrack.summary(app.settings);
+      // A project the clock moved while the list was on screen otherwise just
+      // vanishes from the Active filter, which reads as the app losing it.
+      // Say it happened, once, naming the project.
+      announce(wentDormant(summary?.projects ?? null, next.projects));
+      summary = next;
       error = null;
       app.noteSuccess();
     } catch (e) {
@@ -113,6 +119,16 @@
       loading = false;
       refreshing = false;
     }
+  }
+
+  /** Tell the user which projects went quiet on their own, in one toast. */
+  function announce(moved: SummaryProject[]) {
+    if (moved.length === 0) return;
+    const what =
+      moved.length === 1
+        ? `${moved[0].name} went dormant`
+        : `${moved.length} projects went dormant`;
+    app.showToast(`${what} · untouched for ${dormantAfterHours} h`);
   }
 
   function setFilter(v: Filter) {
@@ -135,6 +151,9 @@
       app.showToast(e instanceof Error ? e.message : 'Could not update', 'alert');
     }
   }
+
+  /** The dormancy window projtrack is running, so the cards count down to it. */
+  const dormantAfterHours = $derived(summary?.dormant_after_hours ?? DEFAULT_DORMANT_AFTER_HOURS);
 
   const emptyText = $derived(
     filter === 'all' ? 'No projects yet' : `No ${filter} projects`
@@ -197,6 +216,7 @@
         <ProjectCard
           project={p}
           selected={selectedId === p.id}
+          {dormantAfterHours}
           onOpen={() => onOpenProject(p.id)}
           onLongPress={() => (menuFor = p)}
         />

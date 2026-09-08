@@ -2,6 +2,7 @@
   import StatusDot from './StatusDot.svelte';
   import RunSpinner from './RunSpinner.svelte';
   import { liveCountsLine, statusSpec } from '../lib/format';
+  import { dormancy, DEFAULT_DORMANT_AFTER_HOURS } from '../lib/dormancy';
   import { app } from '../lib/store.svelte';
   import { isSettled, liveCounts, liveTaskStatus } from '../lib/live';
   import { isRemote, machineForRef } from '../lib/pane-id';
@@ -10,14 +11,18 @@
   let {
     project,
     selected = false,
+    dormantAfterHours = DEFAULT_DORMANT_AFTER_HOURS,
     onOpen,
     onLongPress,
   }: {
     project: SummaryProject;
     selected?: boolean;
+    /** The window projtrack reported, so the countdown matches the server. */
+    dormantAfterHours?: number;
     onOpen: () => void;
     onLongPress: () => void;
   } = $props();
+
 
   let timer: ReturnType<typeof setTimeout> | null = null;
   let longFired = false;
@@ -94,6 +99,28 @@
   const blocked = $derived(lines.filter((l) => l.live === 'blocked'));
   /** Everything else, behind the expander. */
   const rest = $derived(lines.filter((l) => l.live !== 'running' && l.live !== 'blocked'));
+  /**
+   * What the card says about this project going quiet, if anything.
+   *
+   * Dormant is no longer only a status somebody chose, so a card that just
+   * showed the word left the user to guess whether they had marked it or the
+   * clock had. The note says which: when it last had activity if it is already
+   * dormant, how long it has left if it is close.
+   *
+   * Recomputed from the clock on every render, like every other relative time
+   * in the app; the 15 s summary poll is what brings the card round again.
+   *
+   * Suppressed while a pane on this project is actually doing something. A
+   * card reading "1 running · Quiet since 12 min ago" contradicts itself, and
+   * the panes are the better witness: the ledger says when a row was last
+   * written, they say what is happening now. This is reachable whenever a
+   * project is marked dormant by hand with an agent still mid-run on it.
+   */
+  const quiet = $derived(
+    running.length > 0 || blocked.length > 0
+      ? { hoursLeft: 0, soon: false, note: '' }
+      : dormancy(project, dormantAfterHours, Date.now())
+  );
 
   const counts = $derived(
     liveCounts(
@@ -146,7 +173,14 @@
         </span>
       {/if}
     </span>
-    <span class="t-meta counts">{liveCountsLine(counts)}</span>
+    <span class="t-meta counts">
+      {liveCountsLine(counts)}
+      {#if quiet.note}
+        <span class="quiet" class:soon={quiet.soon} data-testid="dormancy-note">
+          · {quiet.note}
+        </span>
+      {/if}
+    </span>
 
     <!-- Collapsed, a card lists what is running and what is waiting on an
          answer. Everything else is behind the expander. -->
@@ -246,6 +280,16 @@
   }
   .dormant {
     opacity: 0.8;
+  }
+  /* The clock's own voice: why this project is dormant, or that it is about
+     to be. Tertiary, because it explains the status rather than being it. */
+  .quiet {
+    color: var(--t-tertiary);
+  }
+  /* A project still active but running out of window. Not an alert: nothing is
+     wrong, and the countdown stops the moment anybody touches it. */
+  .quiet.soon {
+    color: var(--c-muted);
   }
   .dead {
     opacity: 0.55;

@@ -13,6 +13,7 @@
   import { ApiError, projtrack } from '../lib/api';
   import { isSettled, liveTaskStatus } from '../lib/live';
   import { relativeTime, statusSpec } from '../lib/format';
+  import { dormancy } from '../lib/dormancy';
   import type { ProjectDetail, ProjectStatus, Task } from '../lib/types';
   import { onMount } from 'svelte';
 
@@ -40,6 +41,20 @@
     ledgerRunning.filter((t) => isSettled(liveTaskStatus(t, app.paneIndex, app.panesKnown, app.machineNames)))
   );
   const queued = $derived(project?.tasks.filter((t) => t.status === 'queued') ?? []);
+
+  /**
+   * When anything last happened on this project, and what that means for its
+   * status.
+   *
+   * `updated_at` used to be the line here, and it is the wrong column now that
+   * the clock reads activity: it moves only on a PATCH of the project itself,
+   * so a project whose agents worked on its tasks all morning still reported
+   * being updated yesterday. `last_activity` is projtrack's rollup of the
+   * project, its tasks and their events, which is the figure dormancy is
+   * actually decided on.
+   */
+  const activityAt = $derived(project ? project.last_activity || project.updated_at : '');
+  const quiet = $derived(project ? dormancy(project) : { note: '', soon: false, hoursLeft: 0 });
   const finished = $derived(
     (project?.tasks.filter((t) => ['done', 'failed', 'abandoned'].includes(t.status)) ?? [])
       .slice()
@@ -106,7 +121,10 @@
         <div class="meta">
           <StatusDot domain="project" value={project.status} size={9} pulse={false} />
           <span class="t-meta">
-            {statusSpec('project', project.status).label} · updated {relativeTime(project.updated_at)}
+            {statusSpec('project', project.status).label} · active {relativeTime(activityAt)}
+            {#if quiet.note}
+              <span class="quiet" data-testid="dormancy-note">· {quiet.note}</span>
+            {/if}
           </span>
         </div>
       {/if}
@@ -182,6 +200,11 @@
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+  /* Why this project is dormant, or that it is heading that way. */
+  .quiet {
+    color: var(--t-tertiary);
+    margin-left: 4px;
   }
   .desc {
     display: block;

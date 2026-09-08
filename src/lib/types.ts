@@ -31,6 +31,15 @@ export interface SummaryProject {
   status: ProjectStatus;
   created_at: string;
   updated_at: string;
+  /**
+   * When anything last happened on this project: the project row, any of its
+   * tasks, or any event on those tasks. projtrack computes it and turns a
+   * project dormant once it is older than `dormant_after_hours`.
+   *
+   * Optional because a projtrack from before automatic dormancy does not send
+   * it, and the app still has to render against one.
+   */
+  last_activity?: string;
   running_tasks: Task[];
   open_tasks: Task[];
   task_counts: TaskCounts;
@@ -39,6 +48,8 @@ export interface SummaryProject {
 export interface Summary {
   generated_at: string;
   status: string;
+  /** How long a project may go untouched before projtrack marks it dormant. */
+  dormant_after_hours?: number;
   projects_shown: number;
   running_tasks: number;
   queued_tasks: number;
@@ -52,6 +63,8 @@ export interface ProjectDetail {
   status: ProjectStatus;
   created_at: string;
   updated_at: string;
+  /** See SummaryProject.last_activity. */
+  last_activity?: string;
   tasks: Task[];
 }
 
