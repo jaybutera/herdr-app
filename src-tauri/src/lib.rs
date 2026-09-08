@@ -11,6 +11,12 @@ pub fn run() {
         // does nothing in the Android WebView or replaces the app with the
         // page, so RichText routes every URL through this instead.
         .plugin(tauri_plugin_opener::init())
+        // Posts a system notification when the orchestrator says something
+        // while the chat is not on screen. Android's WebView has no
+        // `Notification`, so the web API alone would leave the APK silent;
+        // src/lib/notify.ts picks this on Android and the web API on the
+        // laptop.
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(

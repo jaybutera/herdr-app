@@ -168,6 +168,24 @@ The Chat tab icon carries a small dot when there are unread orchestrator or
 event messages. The Fleet tab icon carries a red dot when any pane in the
 cached `/panes` list is `blocked`. Both dots clear on viewing.
 
+Unread is counted by a watcher that polls `/chat/messages?after={seen}` on the
+projects cadence whenever the conversation is *not* on screen — another tab,
+another window, or a phone in a pocket. It is seeded on first run with the
+newest id and says nothing about it, so opening the app is never an
+announcement of the whole history. Only `orchestrator` and `event` messages
+count: `user` messages are his own, sent from here or from Telegram, and
+`system` messages are the daemon answering a slash command he just typed.
+
+The watcher also raises a toast while the app is on screen, and, when the
+notification setting is on, one system notification per batch. This is the one
+poll that keeps running while the page is hidden, against section 9: a
+notification that only arrives while you are already looking at the app is not
+a notification. Notifications are the platform's, behind one call in
+`src/lib/notify.ts`: the browser's `Notification` on the laptop, and
+tauri-plugin-notification in the APK, because the Android WebView has no
+`Notification` constructor. Permission is asked for from the Settings toggle,
+because Chrome refuses the prompt without a tap and Android 13 shows its own.
+
 ### 3.3 Laptop layout, 900 px and wider
 
 Same routes, different arrangement. The bottom bar becomes a 64 px left rail
@@ -761,7 +779,10 @@ else; screens compose them.
 
 - All polling stops when the page is hidden (`visibilitychange`) and resumes
   with an immediate fetch on return. On Android, Tauri fires this on
-  background; on the laptop, switching tabs does.
+  background; on the laptop, switching tabs does. The single exception is the
+  chat watcher behind the Chat tab's dot (section 3.2), whose whole purpose is
+  to fire while nobody is looking; it is one small request per tick, and the
+  Android WebView is suspended when the app is backgrounded anyway.
 - Sending into a pane must never double-submit: the send button disables until
   the request returns, and Enter on the phone keyboard is the send action only
   when the field is non-empty.

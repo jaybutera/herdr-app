@@ -11,6 +11,14 @@ export interface Settings {
   pollSpeed: PollSpeed;
   /** Fleet root remembers its filter across launches (section 9). */
   projectFilter: string;
+  /**
+   * Whether to post a system notification when the orchestrator has something
+   * to say and the chat is not on screen. Off until it is turned on in
+   * Settings, because asking for notification permission needs a tap: Chrome
+   * refuses the prompt without one, and Android 13 shows its own. The in-app
+   * dot and toast do not depend on this.
+   */
+  notify: boolean;
 }
 
 /** Pane / chat / projects poll intervals in ms, by speed (section 5.5). */
@@ -30,6 +38,7 @@ export const DEFAULTS: Settings = {
   token: '',
   pollSpeed: 'normal',
   projectFilter: 'active',
+  notify: false,
 };
 
 // The app is Orcha now, but the storage keys keep the old name on purpose:

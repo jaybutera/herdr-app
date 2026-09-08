@@ -10,6 +10,7 @@
   import SettingsSheet from './screens/SettingsSheet.svelte';
   import { app } from './lib/store.svelte';
   import { bridge, projtrack } from './lib/api';
+  import { startChatWatch } from './lib/chat-watch';
   import type { Task } from './lib/types';
   import { onMount } from 'svelte';
 
@@ -99,11 +100,17 @@
     void pollPanes();
     const paneTimer = setInterval(pollPanes, app.intervals.projects);
 
+    // The orchestrator's news while the chat is not on screen: the tab dot, a
+    // toast, and a system notification. Lives here rather than in Chat because
+    // Chat is not mounted when it is needed.
+    const stopChatWatch = startChatWatch();
+
     return () => {
       mq.removeEventListener('change', apply);
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('popstate', onPop);
       clearInterval(paneTimer);
+      stopChatWatch();
     };
   });
 

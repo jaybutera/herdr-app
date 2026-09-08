@@ -8,6 +8,24 @@ One codebase, two targets: an installed Android APK through Tauri 2, and the sam
 bundle served as a static page for the laptop browser. `DESIGN.md` is the UI
 spec this was built from; it is the reference for anything not described here.
 
+## Being told about a new message
+
+The Chat tab carries a dot, a toast appears if the app is on screen, and the
+phone or the laptop posts a system notification when the orchestrator answers
+or a session finishes while the chat is not in front of you. Turn the
+notifications on under Settings > New message notifications; the toggle is what
+asks the platform for permission, since neither Chrome nor Android 13 will
+prompt without a tap. The dot and the toast need no permission and are always
+on.
+
+It is polling, not a push service: the app asks the daemon for anything after
+the last message it showed you, on the projects cadence, and only while the
+chat is not on screen. On the laptop that keeps working in a background tab. On
+the phone the WebView is suspended when the app is backgrounded, so the
+notification arrives when the app is next foregrounded rather than while it is
+asleep — a real background push would need a daemon-side service and a
+notification channel, which this deliberately does not have.
+
 ## Stack
 
 Svelte 5 and Vite, no component library: every component in section 8 of the spec

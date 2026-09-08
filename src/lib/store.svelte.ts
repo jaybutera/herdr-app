@@ -35,8 +35,19 @@ class AppStore {
   panesKnown = $state(false);
   /** Machines the bridge can reach. Empty until /machines has answered. */
   machines = $state<Machine[]>([]);
-  /** Set when chat has messages the user has not seen. */
-  chatUnread = $state(false);
+  /**
+   * The newest chat message that has been in front of Casper. 0 until the chat
+   * has been read or the watcher has looked once; the watcher seeds it rather
+   * than announcing the whole history the first time it runs.
+   */
+  chatSeenId = $state(0);
+  /** Orchestrator and event messages that have arrived since (section 3.2). */
+  chatUnreadCount = $state(0);
+
+  /** Set when chat has messages the user has not seen. Drives the tab dot. */
+  get chatUnread(): boolean {
+    return this.chatUnreadCount > 0;
+  }
 
   /** Page visibility drives every poll (section 9). */
   visible = $state(true);
@@ -128,7 +139,7 @@ class AppStore {
     this.transition(() => {
       this.tab = tab;
     });
-    if (tab === 'chat') this.chatUnread = false;
+    if (tab === 'chat') this.chatUnreadCount = 0;
   }
 
   /** Deep link from a chat event: push the task and switch to Fleet. */
@@ -148,6 +159,21 @@ class AppStore {
       return true;
     }
     return this.pop();
+  }
+
+  // ---------- the orchestrator's news ----------
+
+  /** Everything up to `id` has been seen. Called by the Chat screen while it
+   *  is on screen, and by the watcher when it first looks. */
+  noteChatSeen(id: number) {
+    if (id > this.chatSeenId) this.chatSeenId = id;
+    this.chatUnreadCount = 0;
+  }
+
+  /** `count` messages arrived while Casper was somewhere else. */
+  noteChatArrivals(id: number, count: number) {
+    if (id > this.chatSeenId) this.chatSeenId = id;
+    this.chatUnreadCount += count;
   }
 
   // ---------- feedback ----------
