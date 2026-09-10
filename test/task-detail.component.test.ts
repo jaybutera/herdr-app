@@ -5,11 +5,11 @@
 // proof the session was dead, and then stopped the only poll that could have
 // corrected it.
 
-import { render, screen, cleanup } from '@testing-library/svelte';
+import { render, screen, cleanup, fireEvent } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { app } from '../src/lib/store.svelte';
-import { ApiError } from '../src/lib/api';
+import { ApiError, PANE_LINES, PANE_LINES_MAX } from '../src/lib/api';
 import type { Machine, Pane, TaskDetail as TaskDetailShape } from '../src/lib/types';
 
 // The bridge the app talks to, standing in for the live one. `read` answers
@@ -175,7 +175,7 @@ describe('a session running on box', () => {
     app.panesKnown = true;
     await flush();
 
-    expect(reads).toHaveBeenCalledWith(expect.anything(), 'box/wC:p1');
+    expect(reads).toHaveBeenCalledWith(expect.anything(), 'box/wC:p1', PANE_LINES);
     expect(screen.queryByText('Pane gone')).toBeNull();
   });
 });
@@ -207,7 +207,7 @@ describe('a session running on this laptop', () => {
     draw();
     await flush();
 
-    expect(reads).toHaveBeenCalledWith(expect.anything(), 'w9K:p1');
+    expect(reads).toHaveBeenCalledWith(expect.anything(), 'w9K:p1', PANE_LINES);
     expect(screen.queryByText('Pane gone')).toBeNull();
   });
 });
@@ -695,5 +695,99 @@ describe('a session on a machine /machines reports down', () => {
 
     expect(reads.mock.calls.length).toBeGreaterThan(stopped);
     expect(screen.queryByText(/Can't reach box/)).toBeNull();
+  });
+});
+
+// Scrolling further back than the 200-line poll window (section 5.3a). The
+// window is small because it is fetched every 2 s over Tailscale; the whole
+// window herdr will give is ~5x the bytes, so it is asked for by hand.
+describe('reading further back than the live poll window', () => {
+  /** A bridge whose reply grows with the window asked for, as the real one does. */
+  function bridgeWithScrollback() {
+    reads.mockImplementation(async (_s: unknown, id: string, lines: number) => ({
+      pane_id: id,
+      machine: 'box',
+      agent_status: 'working' as const,
+      read_at: '2026-09-07T19:56:23Z',
+      text:
+        lines >= PANE_LINES_MAX
+          ? '● The part that scrolled off\n● Now the sendrawtransaction handler:'
+          : '● Now the sendrawtransaction handler:',
+    }));
+  }
+
+  beforeEach(() => {
+    bridgeWithScrollback();
+    app.setPanes([BOX_PANE]);
+    app.setMachines(MACHINES);
+    app.panesKnown = true;
+  });
+
+  it('polls the small window until asked for more', async () => {
+    draw();
+    await flush();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await flush();
+
+    expect(reads.mock.calls.length).toBeGreaterThan(1);
+    expect(reads.mock.calls.every((c) => c[2] === PANE_LINES)).toBe(true);
+  });
+
+  it('offers the earlier lines rather than silently truncating', async () => {
+    draw();
+    await flush();
+
+    expect(screen.getByText(/Earlier/)).toBeTruthy();
+    expect(screen.queryByText(/The part that scrolled off/)).toBeNull();
+  });
+
+  it('shows what scrolled off once Earlier is tapped', async () => {
+    draw();
+    await flush();
+
+    await fireEvent.click(screen.getByText(/Earlier/));
+    await flush();
+
+    expect(reads.mock.calls.some((c) => c[2] === PANE_LINES_MAX)).toBe(true);
+    expect(screen.getByText(/The part that scrolled off/)).toBeTruthy();
+  });
+
+  // The reason the wider window is sticky: a poll that reverted to 200 lines
+  // would take the history away two seconds after it arrived.
+  it('keeps polling the wide window afterwards', async () => {
+    draw();
+    await flush();
+    await fireEvent.click(screen.getByText(/Earlier/));
+    await flush();
+    const afterTap = reads.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await flush();
+
+    expect(reads.mock.calls.length).toBeGreaterThan(afterTap);
+    expect(reads.mock.calls.slice(afterTap).every((c) => c[2] === PANE_LINES_MAX)).toBe(true);
+    expect(screen.getByText(/The part that scrolled off/)).toBeTruthy();
+  });
+
+  it('says where the scrollback ends rather than offering a wider read twice', async () => {
+    draw();
+    await flush();
+    await fireEvent.click(screen.getByText(/Earlier/));
+    await flush();
+
+    expect(screen.queryByText(/Earlier/)).toBeNull();
+    expect(screen.getByText('Start of available scrollback')).toBeTruthy();
+  });
+
+  // Nothing to go back from until the first read lands: offering it against an
+  // empty screen would read as a second "Reading pane…".
+  it('offers nothing until there is a transcript', async () => {
+    reads.mockImplementation(() => new Promise(() => {}));
+
+    draw();
+    await flush();
+
+    expect(screen.getByText('Reading pane…')).toBeTruthy();
+    expect(screen.queryByText(/Earlier/)).toBeNull();
   });
 });

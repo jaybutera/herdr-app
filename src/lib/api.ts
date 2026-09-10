@@ -189,6 +189,22 @@ export const projtrack = {
 
 // ---------- pane bridge (section 2.2) ----------
 
+/**
+ * Lines of pane scrollback a live poll asks for, and the most one can ask for.
+ *
+ * The steady-state window is deliberately small: on a task screen this is
+ * fetched every 2 s over Tailscale, and 200 lines is ~7 KB against ~35 KB for
+ * the full window. Tapping "Earlier" swaps this screen's poll to `PANE_LINES_MAX`
+ * for the rest of the visit (section 5.3a).
+ *
+ * `PANE_LINES_MAX` is herdr's ceiling, not ours. The bridge clamps `lines` to
+ * 2000, but `herdr pane read --source recent[-unwrapped]` returns at most 1000
+ * lines whatever it is asked for (measured against live panes with 1200-2200
+ * lines of scrollback on 2026-09-10), so asking for more only inflates the URL.
+ */
+export const PANE_LINES = 200;
+export const PANE_LINES_MAX = 1000;
+
 export const bridge = {
   panes: (s: Settings) => request<{ panes: Pane[] }>(s.bridgeUrl, '/panes', s),
 
@@ -198,7 +214,7 @@ export const bridge = {
   pane: (s: Settings, paneId: string) =>
     request<Pane>(s.bridgeUrl, `/panes/${encodeURIComponent(paneId)}`, s),
 
-  read: (s: Settings, paneId: string, lines = 200) =>
+  read: (s: Settings, paneId: string, lines: number = PANE_LINES) =>
     request<PaneRead>(
       s.bridgeUrl,
       `/panes/${encodeURIComponent(paneId)}/read?source=recent-unwrapped&lines=${lines}`,

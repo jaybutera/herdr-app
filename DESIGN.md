@@ -429,6 +429,17 @@ Content rules:
 - Poll `GET /panes/{id}/read?source=recent-unwrapped&lines=200` every 2 s.
   Diff against the last text; re-render only when it changed. Do not animate
   unchanged blocks.
+- **Scrollback**: 200 lines is the poll window, not the limit. At the head of
+  the transcript sits an "↑ Earlier" control; tapping it re-reads at
+  `lines=1000` and every poll after it on that screen stays at 1000, so the
+  history cannot vanish two seconds after it arrived. The extra lines land
+  above the viewport, which is held at its distance from the bottom rather than
+  its offset from the top. Once widened the control is replaced by "Start of
+  available scrollback", because 1000 is as far back as herdr goes: the bridge
+  clamps `lines` to 2000, but `herdr pane read --source recent[-unwrapped]`
+  returns at most 1000 lines however many it is asked for. The window is small
+  by default because the phone fetches it every 2 s over Tailscale - ~7 KB a
+  read against ~35 KB for the full window.
 - **Messages view** parses the pane text into blocks using the same rules the
   orchestrator uses in `index.mjs` (`extractLastAgentMessage` and its
   `PANE_CHROME` list), generalised to keep every block rather than only the

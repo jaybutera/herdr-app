@@ -19,7 +19,7 @@
   import TimeDivider from '../components/TimeDivider.svelte';
   import ActionSheet from '../components/ActionSheet.svelte';
   import { app } from '../lib/store.svelte';
-  import { ApiError, apiFailureText, bridge, projtrack } from '../lib/api';
+  import { ApiError, apiFailureText, bridge, PANE_LINES, PANE_LINES_MAX, projtrack } from '../lib/api';
   import { parsePane, type Block } from '../lib/pane-parse';
   import { isRefUnresolved, isRemote, machineForRef, paneIdForRef } from '../lib/pane-id';
   import { isSettled, liveTaskStatus, paneIsGone, shouldPollPane } from '../lib/live';
@@ -60,6 +60,18 @@
   let scroller: HTMLDivElement | undefined = $state();
   let atBottom = $state(true);
   let showJump = $state(false);
+
+  /**
+   * How much scrollback this screen is reading, and whether a wider read is in
+   * flight (section 5.3a).
+   *
+   * The poll asks for `PANE_LINES` until Casper taps "Earlier", and for
+   * `PANE_LINES_MAX` from then until the screen closes. It stays widened on
+   * purpose: dropping back to 200 on the next tick would take the history away
+   * two seconds after it arrived.
+   */
+  let paneLines = $state(PANE_LINES);
+  let expanding = $state(false);
 
   /**
    * The bridge pane id for this task's session.
@@ -226,7 +238,7 @@
     // bridge knows. Asking anyway returns 404 for a live session.
     if (refPending) return;
     try {
-      const r = await bridge.read(app.settings, paneId);
+      const r = await bridge.read(app.settings, paneId, paneLines);
       // Re-render only when the text actually changed (section 5.3a).
       if (r.text !== paneText) {
         paneText = r.text;
@@ -283,6 +295,31 @@
     } catch {
       sessionAlive = false;
     }
+  }
+
+  /**
+   * Widen this screen's read to the whole window herdr will give (section 5.3a).
+   *
+   * The extra lines arrive above what is already on screen, so the viewport is
+   * held at its distance from the bottom rather than its offset from the top:
+   * anchoring to the top would leave Casper looking at a point ~800 lines
+   * further back than the one they tapped from.
+   */
+  async function expandScrollback() {
+    if (paneLines >= PANE_LINES_MAX || expanding) return;
+    expanding = true;
+    const fromBottom = scroller ? scroller.scrollHeight - scroller.scrollTop : 0;
+    const wasAtBottom = atBottom;
+    paneLines = PANE_LINES_MAX;
+    try {
+      await readPane();
+    } finally {
+      expanding = false;
+    }
+    await tick();
+    // At the bottom, readPane has already scrolled there and that is where the
+    // newest output belongs; only a scrolled-up viewport needs holding.
+    if (scroller && !wasAtBottom) scroller.scrollTop = scroller.scrollHeight - fromBottom;
   }
 
   function scrollToBottom(smooth = false) {
@@ -484,6 +521,17 @@
   </div>
 
   <div class="scroll" bind:this={scroller} onscroll={onScroll}>
+    <!-- Both views read the same text, so the scrollback control sits above
+         the switch rather than inside the messages branch. -->
+    {#if paneText}
+      {#if paneLines < PANE_LINES_MAX}
+        <button class="earlier t-meta" onclick={() => void expandScrollback()} disabled={expanding}>
+          {expanding ? 'Loading earlier…' : '↑ Earlier'}
+        </button>
+      {:else}
+        <p class="earlier-end t-meta">Start of available scrollback</p>
+      {/if}
+    {/if}
     {#if firstRead && !paneText}
       <p class="t-meta center">Reading pane…</p>
     {:else if view === 'terminal'}
@@ -627,6 +675,25 @@
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+  /* Sits at the head of the transcript, where a scrolled-up reader meets it.
+     Quiet by default: it is a way further back, not an action on the task. */
+  .earlier {
+    display: block;
+    width: 100%;
+    padding: 8px 0 10px;
+    min-height: 44px;
+    text-align: center;
+    color: var(--t-secondary);
+  }
+  .earlier:disabled {
+    color: var(--t-tertiary);
+  }
+  .earlier-end {
+    margin: 0;
+    padding: 8px 0 10px;
+    text-align: center;
+    color: var(--t-tertiary);
   }
   .jump {
     position: absolute;
