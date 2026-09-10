@@ -8,8 +8,11 @@ import { readFileSync } from 'node:fs';
 const pkg = JSON.parse(readFileSync('./package.json', 'utf8'));
 
 // Build hash shown in Settings > About. Falls back when the tree is not a repo
-// yet, so a fresh clone still builds.
+// yet, so a fresh clone still builds — and is overridable, because the hosted
+// build happens in a container that was handed the files without the history.
 function buildHash(): string {
+  const given = process.env.ORCHA_BUILD_HASH?.trim();
+  if (given) return given;
   try {
     return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
       .toString()

@@ -12,7 +12,9 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev --config src-tauri/tauri.conf.dev.json",
     "android:dev": "tauri android dev --config src-tauri/tauri.conf.dev.json",
-    "android:apk": "tauri android build --target aarch64 --apk"
+    "android:apk": "tauri android build --target aarch64 --apk",
+    "start": "node server.mjs",
+    "deploy": "railway variables --service orcha-app --skip-deploys --set \"ORCHA_BUILD_HASH=$(git rev-parse --short HEAD)\" && railway up --service orcha-app"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
