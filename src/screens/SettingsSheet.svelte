@@ -76,7 +76,9 @@
   async function testProjtrack() {
     projtrackTest = null;
     try {
-      await projtrack.health({ ...app.settings, projtrackUrl, token });
+      // bridgeUrl too: a blank projtrack field means "wherever the bridge is",
+      // and the bridge being tested is the one typed here, not the saved one.
+      await projtrack.health({ ...app.settings, projtrackUrl, bridgeUrl, token });
       projtrackTest = { ok: true, text: 'Reachable' };
     } catch (e) {
       projtrackTest = { ok: false, text: apiFailureLabel(e, !!token.trim()) };
@@ -125,13 +127,14 @@
     <TextField
       label="projtrack URL"
       bind:value={projtrackUrl}
-      placeholder={DEFAULTS.bridgeUrl}
+      placeholder="same as Bridge URL"
       onTest={testProjtrack}
       testResult={projtrackTest}
     />
     <p class="t-meta note">
-      projtrack is reached through the bridge, so both are normally the same
-      host and port.
+      projtrack is reached through the bridge, so leave this blank unless it is
+      somewhere else. It is never this device: projtrack answers only on the
+      machine it runs on.
     </p>
     <TextField label="Bearer token" bind:value={token} masked placeholder="none" />
 

@@ -13,7 +13,7 @@ import type {
   TaskDetail,
   TaskStatus,
 } from './types';
-import type { Settings } from './settings';
+import { projtrackBase, type Settings } from './settings';
 
 /** Thrown for any non-2xx or transport failure; `status` is 0 when the request never landed. */
 export class ApiError extends Error {
@@ -103,7 +103,7 @@ async function request<T>(
   } finally {
     done();
   }
-  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status);
+  if (!res.ok) throw new ApiError(await failureMessage(res), res.status);
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   if (!text) return undefined as T;
@@ -111,6 +111,29 @@ async function request<T>(
     return JSON.parse(text) as T;
   } catch {
     throw new ApiError('Bad JSON in response', res.status);
+  }
+}
+
+/**
+ * The most useful sentence available about a non-2xx answer.
+ *
+ * Both backends say why in the body — `{"error": "..."}` — and dropping it for
+ * the bare status is how "this host serves the app only; set Bridge URL in
+ * Settings" reached a reader as "answered HTTP 501". The status stays, because
+ * it is what distinguishes a refusal from a misconfiguration; the body is what
+ * says which one this is.
+ */
+async function failureMessage(res: Response): Promise<string> {
+  const bare = `HTTP ${res.status}`;
+  try {
+    const text = (await res.text()).slice(0, 400);
+    if (!text) return bare;
+    const said = (JSON.parse(text) as { error?: unknown }).error;
+    return typeof said === 'string' && said.trim() ? `${bare}: ${said.trim()}` : bare;
+  } catch {
+    // A body that is not JSON says nothing a reader can act on: an HTML error
+    // page from something in the middle is noise, not a diagnosis.
+    return bare;
   }
 }
 
@@ -136,7 +159,9 @@ export function apiFailureText(subject: string, err: unknown, hasToken: boolean)
       ? `${subject} rejected the bearer token — check it in Settings (HTTP ${status})`
       : `${subject} needs a bearer token — set one in Settings (HTTP ${status})`;
   }
-  if (status !== 0) return `${subject} answered HTTP ${status}`;
+  // `detail` carries the body when there was one to carry (see failureMessage),
+  // and is the bare status otherwise — which is what this used to say alone.
+  if (status !== 0) return `${subject} answered ${detail}`;
   return `Can't reach ${subject} — ${detail}`;
 }
 
@@ -158,33 +183,33 @@ export function apiFailureLabel(err: unknown, hasToken: boolean): string {
 
 export const projtrack = {
   summary: (s: Settings) =>
-    request<Summary>(s.projtrackUrl, '/projtrack/summary?status=all', s),
+    request<Summary>(projtrackBase(s), '/projtrack/summary?status=all', s),
 
   project: (s: Settings, id: number) =>
-    request<ProjectDetail>(s.projtrackUrl, `/projtrack/projects/${id}`, s),
+    request<ProjectDetail>(projtrackBase(s), `/projtrack/projects/${id}`, s),
 
   task: (s: Settings, id: number) =>
-    request<TaskDetail>(s.projtrackUrl, `/projtrack/tasks/${id}`, s),
+    request<TaskDetail>(projtrackBase(s), `/projtrack/tasks/${id}`, s),
 
   setProjectStatus: (s: Settings, id: number, status: ProjectStatus) =>
-    request<ProjectDetail>(s.projtrackUrl, `/projtrack/projects/${id}`, s, {
+    request<ProjectDetail>(projtrackBase(s), `/projtrack/projects/${id}`, s, {
       method: 'PATCH',
       body: JSON.stringify({ status }),
     }),
 
   setTaskStatus: (s: Settings, id: number, status: TaskStatus) =>
-    request<TaskDetail>(s.projtrackUrl, `/projtrack/tasks/${id}`, s, {
+    request<TaskDetail>(projtrackBase(s), `/projtrack/tasks/${id}`, s, {
       method: 'PATCH',
       body: JSON.stringify({ status }),
     }),
 
   addNote: (s: Settings, taskId: number, note: string) =>
-    request<unknown>(s.projtrackUrl, `/projtrack/tasks/${taskId}/events`, s, {
+    request<unknown>(projtrackBase(s), `/projtrack/tasks/${taskId}/events`, s, {
       method: 'POST',
       body: JSON.stringify({ note }),
     }),
 
-  health: (s: Settings) => request<unknown>(s.projtrackUrl, '/projtrack/health', s),
+  health: (s: Settings) => request<unknown>(projtrackBase(s), '/projtrack/health', s),
 };
 
 // ---------- pane bridge (section 2.2) ----------

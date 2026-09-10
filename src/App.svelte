@@ -9,7 +9,7 @@
   import Chat from './screens/Chat.svelte';
   import SettingsSheet from './screens/SettingsSheet.svelte';
   import { app } from './lib/store.svelte';
-  import { bridge, projtrack } from './lib/api';
+  import { apiFailureText, bridge, projtrack } from './lib/api';
   import { startChatWatch } from './lib/chat-watch';
   import type { Task } from './lib/types';
   import { onMount } from 'svelte';
@@ -83,9 +83,22 @@
       try {
         const r = await bridge.panes(app.settings);
         app.setPanes(r.panes ?? []);
-      } catch {
+        app.bridgeError = null;
+      } catch (e) {
         // The bridge may not be up. `panesKnown` stays as it was, so screens
-        // fall back to the ledger rather than calling every session an orphan.
+        // fall back to the ledger rather than calling every session an orphan
+        // — but the reason is kept now, because screens that wait on this list
+        // used to wait on it silently and forever.
+        // Named, the way the projtrack banner names its address. Without it a
+        // reader is told the bridge said something without being told which
+        // bridge, and the whole question in that moment — the two addresses in
+        // Settings are separate, and one of them is wrong — is which one it
+        // asked.
+        app.bridgeError = apiFailureText(
+          `the pane bridge at ${app.settings.bridgeUrl}`,
+          e,
+          !!app.settings.token
+        );
       }
       try {
         const m = await bridge.machines(app.settings);

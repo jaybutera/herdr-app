@@ -36,6 +36,16 @@ class AppStore {
   /** Machines the bridge can reach. Empty until /machines has answered. */
   machines = $state<Machine[]>([]);
   /**
+   * Why the pane bridge is not answering, while it is not.
+   *
+   * The pane polls deliberately keep the last list they had rather than
+   * emptying it on a failure, which is right — but it also meant a bridge that
+   * had never answered at all was indistinguishable from one that was merely
+   * quiet, and every screen that waits on the pane list waited forever without
+   * saying what for. This is that missing sentence.
+   */
+  bridgeError = $state<string | null>(null);
+  /**
    * The newest chat message that has been in front of Casper. 0 until the chat
    * has been read or the watcher has looked once; the watcher seeds it rather
    * than announcing the whole history the first time it runs.

@@ -791,3 +791,59 @@ describe('reading further back than the live poll window', () => {
     expect(screen.queryByText(/Earlier/)).toBeNull();
   });
 });
+
+// The screen used to have one thing to say while it had no transcript —
+// "Reading pane…" — including in the case where nothing was being read at all.
+// `readPane` returns before it starts when the machine list has not arrived, so
+// a bridge that never answered left that line up for as long as the screen was
+// open, under a header reading "Finding session", with nothing anywhere naming
+// the bridge. That was reported as the app hanging.
+describe('while the pane list has not arrived', () => {
+  beforeEach(() => {
+    app.setPanes([]);
+    app.setMachines([]);
+    app.panesKnown = false;
+    store.bridgeError = null;
+  });
+
+  afterEach(() => {
+    store.bridgeError = null;
+  });
+
+  it('says what it is waiting for rather than claiming to read', async () => {
+    draw();
+    await flush();
+
+    expect(screen.getByText('Finding the session…')).toBeTruthy();
+    expect(screen.queryByText('Reading pane…')).toBeNull();
+    // Nothing was asked of the bridge: the ref does not resolve yet.
+    expect(reads).not.toHaveBeenCalled();
+  });
+
+  it('names the bridge failure once there is one, instead of waiting silently', async () => {
+    store.bridgeError = 'the pane bridge answered HTTP 501: this host serves the app only';
+
+    draw();
+    await flush();
+
+    expect(screen.getByText(/answered HTTP 501/)).toBeTruthy();
+    expect(screen.queryByText('Reading pane…')).toBeNull();
+    expect(screen.queryByText('Finding the session…')).toBeNull();
+  });
+
+  it('goes back to reading once the list resolves the ref', async () => {
+    const view = draw();
+    await flush();
+    expect(screen.getByText('Finding the session…')).toBeTruthy();
+
+    app.setMachines(MACHINES);
+    app.setPanes([BOX_PANE]);
+    app.panesKnown = true;
+    await flush();
+    await vi.advanceTimersByTimeAsync(app.intervals.pane + 50);
+    await flush();
+
+    expect(reads).toHaveBeenCalled();
+    expect(view.container.textContent).toContain('sendrawtransaction');
+  });
+});

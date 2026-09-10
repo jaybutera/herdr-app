@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { projtrackBase } from '../lib/settings';
   // Fleet root, section 5.1.
   import Header from '../components/Header.svelte';
   import SummaryLine from '../components/SummaryLine.svelte';
@@ -113,7 +114,7 @@
       error = null;
       app.noteSuccess();
     } catch (e) {
-      error = apiFailureText(`projtrack at ${app.settings.projtrackUrl}`, e, !!app.settings.token);
+      error = apiFailureText(`projtrack at ${projtrackBase(app.settings)}`, e, !!app.settings.token);
       app.noteFailure();
     } finally {
       loading = false;

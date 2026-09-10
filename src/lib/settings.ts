@@ -28,28 +28,79 @@ export const POLL_INTERVALS: Record<PollSpeed, { pane: number; chat: number; pro
   slow: { pane: 5000, chat: 10000, projects: 30000 },
 };
 
+export function isTauri(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+/** The laptop's own bridge: the right guess only for a page on the laptop. */
+const LOOPBACK = 'http://127.0.0.1:17988';
+
+function isLoopback(url: string): boolean {
+  try {
+    const h = new URL(url).hostname;
+    return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Where to look before anyone has been to Settings.
+ *
+ * A page that came from somewhere other than a dev server on this machine came
+ * from something that also answers the API — the orchestrator, which serves
+ * this bundle at `/`, or the hosted copy that proxies to it — so that page's
+ * own origin is a far better guess than a loopback address, which on a phone
+ * names the phone. It is only ever a default: Settings still decides.
+ *
+ * Not on Android, where the page is served by Tauri from its own asset
+ * protocol and its origin means nothing on the network.
+ */
+function defaultBase(): string {
+  if (typeof window === 'undefined' || isTauri()) return LOOPBACK;
+  const { origin, protocol } = window.location;
+  if (protocol !== 'http:' && protocol !== 'https:') return LOOPBACK;
+  return isLoopback(origin) ? LOOPBACK : origin;
+}
+
 export const DEFAULTS: Settings = {
-  // Both point at the bridge: projtrack is loopback-only with no CORS headers,
-  // so its calls are proxied through the bridge's /projtrack routes. The phone
-  // reaches the laptop over Tailscale, so these are overridden in Settings on
-  // the device (http://<tailscale-host>:17988).
-  projtrackUrl: 'http://127.0.0.1:17988',
-  bridgeUrl: 'http://127.0.0.1:17988',
+  // Blank, meaning "wherever the bridge is". projtrack binds loopback and sends
+  // no CORS headers, so no browser has ever called it directly: its calls go to
+  // the bridge's /projtrack routes and the two fields are the same address in
+  // every deployment there has been. See projtrackBase.
+  projtrackUrl: '',
+  bridgeUrl: defaultBase(),
   token: '',
   pollSpeed: 'normal',
   projectFilter: 'active',
   notify: false,
 };
 
+/**
+ * The base for projtrack's calls.
+ *
+ * Blank means the bridge, which is what the field now defaults to. So does a
+ * loopback address entered while the bridge is somewhere else: that is the old
+ * default nobody edited, and from a phone or a hosted page it names the device
+ * the page is open on rather than the laptop — a request that cannot succeed
+ * and whose failure reads as "projtrack is down". The bridge is proxying
+ * projtrack in every one of those cases anyway.
+ *
+ * A loopback projtrack alongside a loopback bridge is left alone: that is the
+ * laptop, where both are right.
+ */
+export function projtrackBase(s: Settings): string {
+  const named = s.projtrackUrl.trim();
+  if (!named) return s.bridgeUrl;
+  if (isLoopback(named) && !isLoopback(s.bridgeUrl)) return s.bridgeUrl;
+  return named;
+}
+
 // The app is Orcha now, but the storage keys keep the old name on purpose:
 // they address settings already written on Casper's phone. Renaming them
 // discards the bridge URL and the token, same as changing the applicationId
 // would. Not worth a tidier string.
 const KEY = 'herdr.settings';
-
-export function isTauri(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-}
 
 type TauriStore = {
   get(key: string): Promise<unknown>;

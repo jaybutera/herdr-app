@@ -231,6 +231,24 @@
     }
   }
 
+  /**
+   * What the empty transcript is waiting for.
+   *
+   * It used to say "Reading pane…" in every case, including the two where
+   * nothing is being read at all: `readPane` returns before it starts when the
+   * ref cannot be resolved yet, so a bridge that never answers left that line
+   * on screen for as long as the screen was open, under a header that said
+   * "Finding session", with nothing anywhere naming the bridge. A wait with no
+   * end and no reason is the one thing a status line must not be.
+   */
+  const waitingLabel = $derived(
+    refPending && app.bridgeError
+      ? app.bridgeError
+      : refPending
+        ? 'Finding the session…'
+        : 'Reading pane…'
+  );
+
   async function readPane() {
     const paneId = bridgePaneId;
     if (!paneId) return;
@@ -275,7 +293,12 @@
       paneFailures += 1;
       // Three failures in a row raise the banner; the last transcript stays on
       // screen either way, and is never cleared (section 9).
-      if (paneFailures >= 3) paneError = apiFailureText('the pane bridge', e, !!app.settings.token);
+      if (paneFailures >= 3)
+        paneError = apiFailureText(
+          `the pane bridge at ${app.settings.bridgeUrl}`,
+          e,
+          !!app.settings.token
+        );
       app.noteFailure();
     } finally {
       firstRead = false;
@@ -533,7 +556,7 @@
       {/if}
     {/if}
     {#if firstRead && !paneText}
-      <p class="t-meta center">Reading pane…</p>
+      <p class="t-meta center">{waitingLabel}</p>
     {:else if view === 'terminal'}
       <TerminalView text={paneText} />
     {:else}
