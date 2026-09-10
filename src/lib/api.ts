@@ -212,6 +212,22 @@ export const projtrack = {
   health: (s: Settings) => request<unknown>(projtrackBase(s), '/projtrack/health', s),
 };
 
+export type UsageLimit = { name: string; used_percent: number; remaining_percent: number; resets_at: string | null; active?: boolean };
+export type UsageAccount = { machines: string[]; subscription?: string | null; plan?: string | null; limits: UsageLimit[]; observed_at?: string };
+export type UsageResponse = {
+  generated_at: string;
+  cached_until: string;
+  cache: 'fresh' | 'refreshed' | 'stale';
+  stale?: boolean;
+  providers: Record<'claude' | 'codex', { source: string; accounts: UsageAccount[] }>;
+  local_activity: Record<string, { sessions_24h: number; sessions_7d: number; note: string }>;
+  unavailable: { provider: string; machine: string; reason: string }[];
+};
+
+export const usage = {
+  read: (s: Settings, force = false) => request<UsageResponse>(s.bridgeUrl, `/usage${force ? '?refresh=1' : ''}`, s),
+};
+
 // ---------- pane bridge (section 2.2) ----------
 
 /**

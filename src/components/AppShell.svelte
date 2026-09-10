@@ -10,12 +10,13 @@
   const tabs = [
     { id: 'fleet' as const, label: 'Fleet', icon: 'fleet' as const },
     { id: 'chat' as const, label: 'Chat', icon: 'chat' as const },
+    { id: 'usage' as const, label: 'Usage', icon: 'usage' as const },
   ];
 
-  function dotFor(id: 'fleet' | 'chat') {
+  function dotFor(id: 'fleet' | 'chat' | 'usage') {
     // Fleet: red dot when any cached pane is blocked. Chat: unread dot (§3.2).
     if (id === 'fleet') return app.needsAttention ? 'alert' : null;
-    return app.chatUnread ? 'accent' : null;
+    return id === 'chat' && app.chatUnread ? 'accent' : null;
   }
 </script>
 

@@ -7,6 +7,7 @@
   import ProjectDetail from './screens/ProjectDetail.svelte';
   import TaskDetail from './screens/TaskDetail.svelte';
   import Chat from './screens/Chat.svelte';
+  import Usage from './screens/Usage.svelte';
   import SettingsSheet from './screens/SettingsSheet.svelte';
   import { app } from './lib/store.svelte';
   import { apiFailureText, bridge, projtrack } from './lib/api';
@@ -50,6 +51,8 @@
   }
 
   onMount(() => {
+    if (location.hash === '#usage') app.tab = 'usage';
+    else if (location.hash === '#chat') app.tab = 'chat';
     const mq = window.matchMedia('(min-width: 900px)');
     const apply = () => (wide = mq.matches);
     apply();
@@ -139,6 +142,8 @@
     <div class="pane full">
       <Chat onOpenPane={openPane} />
     </div>
+  {:else if app.tab === 'usage'}
+    <div class="pane full"><Usage /></div>
   {:else if wide}
     <!-- 3.3 master-detail: Projects at 320px, detail in the second column. -->
     <div class="split">
