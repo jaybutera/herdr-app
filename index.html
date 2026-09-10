@@ -6,6 +6,20 @@
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#0B0E13" />
     <title>Orcha</title>
+
+    <!-- The iPhone build. There is no APK for iOS, so the phone installs this
+         same bundle from the bridge's HTTPS origin: the manifest is what makes
+         "Add to Home Screen" open it without Safari's chrome, and the two
+         apple- tags are what iOS reads instead of parts of the manifest.
+         `black-translucent` puts the page under the status bar, which the
+         header and the tab bar already allow for with env(safe-area-inset-*). -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="icon" href="/icons/icon-192.png" type="image/png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Orcha" />
     <style>
       /* Painted before the bundle parses so the WebView never flashes white. */
       html,
