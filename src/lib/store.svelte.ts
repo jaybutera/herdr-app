@@ -5,7 +5,7 @@ import { DEFAULTS, loadSettings, saveSettings, POLL_INTERVALS, type Settings } f
 import { paneIndex, type PaneIndex } from './live';
 import type { Machine, Pane } from './types';
 
-export type Tab = 'fleet' | 'chat';
+export type Tab = 'fleet' | 'chat' | 'usage';
 
 export type FleetRoute =
   | { screen: 'projects' }
@@ -150,6 +150,7 @@ class AppStore {
       this.tab = tab;
     });
     if (tab === 'chat') this.chatUnreadCount = 0;
+    if (typeof location !== 'undefined') history.replaceState(history.state, '', tab === 'fleet' ? location.pathname + location.search : `#${tab}`);
   }
 
   /** Deep link from a chat event: push the task and switch to Fleet. */
@@ -164,7 +165,7 @@ class AppStore {
       this.settingsOpen = false;
       return true;
     }
-    if (this.tab === 'chat') {
+    if (this.tab === 'chat' || this.tab === 'usage') {
       this.setTab('fleet');
       return true;
     }
