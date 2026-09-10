@@ -82,6 +82,14 @@ function bridgeAnsweringOnlyFor(paneId: string) {
 // of these tests are about what the screen does on the ticks after the first,
 // and the poll interval is seconds. `setTimeout` is left real so `flush` still
 // yields to the microtask queue and to Svelte's own scheduling.
+//
+// `Date` is faked too, and the clock pinned to NOW below. The header prints
+// `relativeTime(updated_at)`, which says "12 min ago" for a recent task and
+// falls back to a bare date past 24 hours. Against the real clock these
+// fixtures aged: the header quietly switched to "7 Sep" and the assertion that
+// the task says when it was last touched failed on a screen that had not
+// changed. The fixture timestamps are fixed, so the clock reading them has to
+// be too.
 const flush = async () => {
   for (let i = 0; i < 5; i += 1) await Promise.resolve();
   await new Promise((r) => realSetTimeout(r, 0));
@@ -89,8 +97,12 @@ const flush = async () => {
 
 const realSetTimeout = globalThis.setTimeout;
 
+/** Twelve minutes after task 103 was last touched, two after its pane was read. */
+const NOW = Date.parse('2026-09-07T19:58:16Z');
+
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+  vi.setSystemTime(NOW);
   vi.clearAllMocks();
   task.mockResolvedValue(TASK_103);
   panes.mockResolvedValue(BOX_PANE);
