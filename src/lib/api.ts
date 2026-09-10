@@ -114,6 +114,40 @@ async function request<T>(
   }
 }
 
+/**
+ * What to tell the user about a failed request.
+ *
+ * Reachability and permission are different failures with different fixes, and
+ * the banner used to call every one of them the first: "Can't reach projtrack
+ * at http://127.0.0.1:17988 — HTTP 403" sent people to go check a service that
+ * had answered them, promptly, to say the bearer token was missing. A status
+ * at all means the request landed, so only a transport failure — `status` 0,
+ * the one case where nothing came back — still gets the reachability wording.
+ *
+ * 401 and 403 name the token instead, and say whether the fix is to set one or
+ * to correct the one already there, because an empty token and a wrong token
+ * are the same HTTP status and not the same mistake.
+ */
+export function apiFailureText(subject: string, err: unknown, hasToken: boolean): string {
+  const status = err instanceof ApiError ? err.status : 0;
+  const detail = err instanceof Error ? err.message : 'Request failed';
+  if (status === 401 || status === 403) {
+    return hasToken
+      ? `${subject} rejected the bearer token — check it in Settings (HTTP ${status})`
+      : `${subject} needs a bearer token — set one in Settings (HTTP ${status})`;
+  }
+  if (status !== 0) return `${subject} answered HTTP ${status}`;
+  return `Can't reach ${subject} — ${detail}`;
+}
+
+/** The same distinction as `apiFailureText`, in the few words a field test has room for. */
+export function apiFailureLabel(err: unknown, hasToken: boolean): string {
+  const status = err instanceof ApiError ? err.status : 0;
+  if (status === 401 || status === 403) return hasToken ? 'Token rejected' : 'No token set';
+  if (status !== 0) return `HTTP ${status}`;
+  return err instanceof Error ? err.message : 'Failed';
+}
+
 // ---------- projtrack (section 2.1) ----------
 //
 // Routed through the bridge's /projtrack proxy rather than called directly.

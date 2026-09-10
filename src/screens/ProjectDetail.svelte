@@ -10,7 +10,7 @@
   import EmptyState from '../components/EmptyState.svelte';
   import ActionSheet from '../components/ActionSheet.svelte';
   import { app } from '../lib/store.svelte';
-  import { ApiError, projtrack } from '../lib/api';
+  import { ApiError, apiFailureText, projtrack } from '../lib/api';
   import { isSettled, liveTaskStatus } from '../lib/live';
   import { relativeTime, statusSpec } from '../lib/format';
   import { dormancy } from '../lib/dormancy';
@@ -72,7 +72,7 @@
         gone = true;
         error = null;
       } else {
-        error = e instanceof Error ? e.message : 'Request failed';
+        error = apiFailureText('projtrack', e, !!app.settings.token);
         app.noteFailure();
       }
     } finally {
@@ -133,7 +133,7 @@
 
   <div class="scroll">
     {#if error}
-      <ErrorBanner text="Can't reach projtrack{error ? ` — ${error}` : ''}" onRetry={load} />
+      <ErrorBanner text={error} onRetry={load} />
     {/if}
 
     {#if loading && !project}

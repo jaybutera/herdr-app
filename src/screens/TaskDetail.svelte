@@ -19,7 +19,7 @@
   import TimeDivider from '../components/TimeDivider.svelte';
   import ActionSheet from '../components/ActionSheet.svelte';
   import { app } from '../lib/store.svelte';
-  import { ApiError, bridge, projtrack } from '../lib/api';
+  import { ApiError, apiFailureText, bridge, projtrack } from '../lib/api';
   import { parsePane, type Block } from '../lib/pane-parse';
   import { isRefUnresolved, isRemote, machineForRef, paneIdForRef } from '../lib/pane-id';
   import { isSettled, liveTaskStatus, paneIsGone, shouldPollPane } from '../lib/live';
@@ -212,7 +212,7 @@
       taskError = null;
       app.noteSuccess();
     } catch (e) {
-      taskError = e instanceof Error ? e.message : 'Request failed';
+      taskError = apiFailureText('projtrack', e, !!app.settings.token);
       app.noteFailure();
     } finally {
       loadingTask = false;
@@ -263,7 +263,7 @@
       paneFailures += 1;
       // Three failures in a row raise the banner; the last transcript stays on
       // screen either way, and is never cleared (section 9).
-      if (paneFailures >= 3) paneError = e instanceof Error ? e.message : 'Request failed';
+      if (paneFailures >= 3) paneError = apiFailureText('the pane bridge', e, !!app.settings.token);
       app.noteFailure();
     } finally {
       firstRead = false;
@@ -517,7 +517,7 @@
   <div class="foot">
     {#if paneError}
       <ErrorBanner
-        text="Can't reach the pane bridge{paneError ? ` — ${paneError}` : ''}"
+        text={paneError}
         onRetry={() => void readPane()}
       />
     {/if}
@@ -538,7 +538,7 @@
   <!-- 5.3b history mode -->
   <div class="scroll">
     {#if taskError}
-      <ErrorBanner text="Can't reach projtrack{taskError ? ` — ${taskError}` : ''}" onRetry={loadTask} />
+      <ErrorBanner text={taskError} onRetry={loadTask} />
     {/if}
 
     {#if loadingTask && !task}

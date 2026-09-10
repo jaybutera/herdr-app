@@ -9,7 +9,7 @@
   import ErrorBanner from '../components/ErrorBanner.svelte';
   import ActionSheet from '../components/ActionSheet.svelte';
   import { app } from '../lib/store.svelte';
-  import { projtrack } from '../lib/api';
+  import { apiFailureText, projtrack } from '../lib/api';
   import { isSettled, liveTaskStatus } from '../lib/live';
   import { DEFAULT_DORMANT_AFTER_HOURS, wentDormant } from '../lib/dormancy';
   import type { ProjectStatus, Summary, SummaryProject } from '../lib/types';
@@ -113,7 +113,7 @@
       error = null;
       app.noteSuccess();
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Request failed';
+      error = apiFailureText(`projtrack at ${app.settings.projtrackUrl}`, e, !!app.settings.token);
       app.noteFailure();
     } finally {
       loading = false;
@@ -199,7 +199,7 @@
 
   {#if error}
     <ErrorBanner
-      text="Can't reach projtrack at {app.settings.projtrackUrl}{error ? ` — ${error}` : ''}"
+      text={error}
       onRetry={() => load()}
     />
   {/if}

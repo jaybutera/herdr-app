@@ -4,7 +4,7 @@
   import TextField from '../components/TextField.svelte';
   import SegmentedFilter from '../components/SegmentedFilter.svelte';
   import { app } from '../lib/store.svelte';
-  import { chat, projtrack } from '../lib/api';
+  import { apiFailureLabel, chat, projtrack } from '../lib/api';
   import { DEFAULTS, type PollSpeed } from '../lib/settings';
   import { permission, requestPermission } from '../lib/notify';
 
@@ -79,7 +79,7 @@
       await projtrack.health({ ...app.settings, projtrackUrl, token });
       projtrackTest = { ok: true, text: 'Reachable' };
     } catch (e) {
-      projtrackTest = { ok: false, text: e instanceof Error ? e.message : 'Failed' };
+      projtrackTest = { ok: false, text: apiFailureLabel(e, !!token.trim()) };
     }
   }
 
@@ -89,7 +89,7 @@
       await chat.state({ ...app.settings, bridgeUrl, token });
       bridgeTest = { ok: true, text: 'Reachable' };
     } catch (e) {
-      bridgeTest = { ok: false, text: e instanceof Error ? e.message : 'Failed' };
+      bridgeTest = { ok: false, text: apiFailureLabel(e, !!token.trim()) };
     }
   }
 

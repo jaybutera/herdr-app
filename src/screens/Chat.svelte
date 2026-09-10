@@ -12,7 +12,7 @@
   import TimeDivider from '../components/TimeDivider.svelte';
   import StatusDot from '../components/StatusDot.svelte';
   import { app } from '../lib/store.svelte';
-  import { chat } from '../lib/api';
+  import { apiFailureText, chat } from '../lib/api';
   import { messagesAfter, newestMessages } from '../lib/chat-feed';
   import { clockTime, stripLeadingEmoji } from '../lib/format';
   import type { ChatMessage, ChatState } from '../lib/types';
@@ -71,7 +71,7 @@
       app.noteChatSeen(lastId);
       await pinToBottom();
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Request failed';
+      error = apiFailureText('the orchestrator', e, !!app.settings.token);
       app.noteFailure();
     } finally {
       loading = false;
@@ -102,7 +102,7 @@
       app.noteSuccess();
       void flushQueue();
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Request failed';
+      error = apiFailureText('the orchestrator', e, !!app.settings.token);
       app.noteFailure();
     }
   }
@@ -282,7 +282,7 @@
       <div class="content" bind:this={content}>
         {#if error}
           <ErrorBanner
-            text="Can't reach the orchestrator{error ? ` — ${error}` : ''}"
+            text={error}
             onRetry={() => void loadInitial()}
           />
         {/if}
